@@ -1,0 +1,166 @@
+{
+  "engine_name": "ai_alpha_signal_engine_v1",
+  "description": "AI-driven alpha generation using market microstructure, long-horizon trends, social sentiment, and multimedia sentiment ingestion (TikTok, X, Instagram).",
+
+  "data_sources": {
+    "market_data": {
+      "provider": "binance",
+      "symbols": ["BTCUSDT", "ETHUSDT"],
+      "intervals": ["1m", "5m", "15m", "1h", "4h"],
+      "fields": ["open", "high", "low", "close", "volume", "trades"],
+      "order_book_levels": 20,
+      "trade_feed": true
+    },
+    "social_media": {
+      "tiktok": {
+        "enabled": true,
+        "fetch_interval_minutes": 10,
+        "fields": ["caption", "hashtags", "likes", "comments", "shares"],
+        "nlp_model": "sentiment-transformer-v2",
+        "video_embedding_model": "clip-base"
+      },
+      "x_twitter": {
+        "enabled": true,
+        "fetch_interval_minutes": 2,
+        "fields": ["text", "retweets", "likes", "replies"],
+        "nlp_model": "finbert-crypto"
+      },
+      "instagram": {
+        "enabled": true,
+        "fetch_interval_minutes": 15,
+        "fields": ["caption", "tags", "like_count", "comments_count"],
+        "nlp_model": "sentiment-transformer-v2"
+      }
+    },
+    "on_chain": {
+      "enabled": true,
+      "provider": "etherscan",
+      "fields": [
+        "active_addresses",
+        "large_transfers",
+        "gas_fees",
+        "nvt_ratio",
+        "tvl"
+      ],
+      "refresh_interval_minutes": 5
+    }
+  },
+
+  "feature_engineering": {
+    "price_features": {
+      "log_returns": [1, 5, 15, 60],
+      "rolling_volatility": [5, 15, 60],
+      "moving_averages": [20, 50, 200],
+      "trend_indicators": ["supertrend", "macd", "rsi", "adx"]
+    },
+    "order_book_features": {
+      "imbalance": true,
+      "spread": true,
+      "depth_snapshot_levels": 10,
+      "trade_imbalance_window": 20
+    },
+    "social_sentiment_features": {
+      "aggregate_sentiment_score": true,
+      "sentiment_volatility": true,
+      "trending_hashtags": true,
+      "engagement_rate": true,
+      "fud_fomo_detector": true
+    },
+    "on_chain_features": {
+      "address_growth_rate": true,
+      "tvl_momentum": true,
+      "whale_transaction_index": true,
+      "network_congestion_factor": true
+    },
+    "regime_detection": {
+      "volatility_regime": ["low", "medium", "high"],
+      "trend_regime": ["uptrend", "downtrend", "range"],
+      "liquidity_regime": ["deep", "normal", "thin"]
+    }
+  },
+
+  "machine_learning": {
+    "models": [
+      {
+        "name": "transformer_market_encoder",
+        "type": "transformer",
+        "input": ["market_data", "order_book"],
+        "sequence_length": 256,
+        "output": "price_direction_embedding"
+      },
+      {
+        "name": "sentiment_fusion_lstm",
+        "type": "lstm",
+        "input": ["social_sentiment", "video_embeddings"],
+        "hidden_size": 128,
+        "output": "sentiment_alpha"
+      },
+      {
+        "name": "meta_ensemble_xgboost",
+        "type": "xgboost",
+        "input": [
+          "market_technical_features",
+          "on_chain_features",
+          "sentiment_alpha",
+          "price_direction_embedding"
+        ],
+        "output": "raw_alpha_score"
+      }
+    ],
+    "ensemble_logic": {
+      "combine_strategy": "weighted_average",
+      "weights": {
+        "transformer_market_encoder": 0.45,
+        "sentiment_fusion_lstm": 0.25,
+        "meta_ensemble_xgboost": 0.30
+      }
+    }
+  },
+
+  "alpha_signal_logic": {
+    "alpha_thresholds": {
+      "strong_buy": 0.75,
+      "buy": 0.55,
+      "hold": 0.45,
+      "sell": 0.30,
+      "strong_sell": 0.15
+    },
+    "confidence_scaling": {
+      "market_regime_weight": 0.4,
+      "sentiment_regime_weight": 0.3,
+      "volatility_penalty": 0.3
+    }
+  },
+
+  "risk_management": {
+    "position_sizing": {
+      "method": "volatility_adjusted",
+      "max_position_percent": 0.25,
+      "min_confidence": 0.50
+    },
+    "safety_rules": {
+      "max_daily_loss_percent": 5,
+      "max_open_positions": 5,
+      "auto_reduce_during_high_volatility": true
+    }
+  },
+
+  "outputs": {
+    "signal_format": {
+      "symbol": "BTCUSDT",
+      "direction": "BUY",
+      "confidence": 0.82,
+      "alpha_score": 0.77,
+      "recommended_sl": "dynamic_atr",
+      "recommended_tp": "1.8R",
+      "timestamp": "auto",
+      "model_version": "v1.0"
+    },
+    "delivery_channels": {
+      "telegram_bot": true,
+      "webhooks": true,
+      "dashboard_api": true,
+      "email_alerts": false
+    }
+  }
+}

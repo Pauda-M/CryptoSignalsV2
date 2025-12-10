@@ -1,0 +1,513 @@
+
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>XRP–BTC AI Dashboard</title>
+  <style>
+    body { font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #020617; color: #e5e7eb; margin: 0; padding: 16px; }
+    h1 { margin-top: 0; }
+    .tabs button { margin-right: 8px; padding: 8px 12px; border-radius: 999px; border: 1px solid #1f2937; background:#020617; color:#e5e7eb; cursor:pointer; font-size:13px;}
+    .tabs button.active { background:#1d4ed8; border-color:#1d4ed8; }
+    .card-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; margin-top: 16px; }
+    .card { padding: 12px; border-radius: 8px; background: #020617; border:1px solid #1f2937;}
+    a.btn { display: inline-block; margin-top: 8px; padding: 6px 10px; border-radius: 4px; background: #fbbf24; color: #000; text-decoration: none; font-weight: 600; font-size: 13px;}
+    table { width: 100%; border-collapse: collapse; margin-top: 8px; font-size: 12px; }
+    th, td { padding: 4px 6px; border-bottom: 1px solid #111827; }
+    th { text-align: left; color: #9ca3af; font-weight:500; }
+    .pill-up { color:#22c55e; }
+    .pill-down { color:#ef4444; }
+    input, select { background:#020617; color:#e5e7eb; border:1px solid #1f2937; border-radius:4px; padding:4px 6px; font-size:12px;}
+    .toolbar { margin-bottom:12px; display:flex; flex-wrap:wrap; gap:8px; align-items:center;}
+    .settings-button { position: fixed; top: 12px; right: 16px; padding: 6px 10px; border-radius: 999px; border:1px solid #1f2937; background:#020617; color:#e5e7eb; cursor:pointer; font-size:12px;}
+    .settings-overlay { position: fixed; inset:0; background:rgba(15,23,42,0.7); display:none; align-items:center; justify-content:center; }
+    .settings-card { width: 480px; max-width: 95vw; background:#020617; border-radius:12px; border:1px solid #1f2937; padding:16px; display:flex; flex-direction:column; max-height: 80vh;}
+    .settings-tabs { display:flex; gap:6px; margin-bottom:8px;}
+    .settings-tabs button { padding:4px 8px; border-radius:999px; border:1px solid #1f2937; background:#020617; color:#e5e7eb; font-size:12px; cursor:pointer;}
+    .settings-tabs button.active { background:#1d4ed8; border-color:#1d4ed8;}
+    .settings-body { flex:1; overflow:auto; font-size:12px; }
+    .settings-footer { display:flex; justify-content:flex-end; gap:8px; margin-top:8px;}
+    .settings-footer button { padding:6px 10px; border-radius:6px; border:none; cursor:pointer; font-size:12px;}
+    .btn-save { background:#22c55e; color:#022c22;}
+    .btn-restore { background:#f97316; color:#1f2933;}
+    .btn-close { background:#4b5563; color:#e5e7eb;}
+  </style>
+</head>
+<body>
+  <button class="settings-button" onclick="openSettings()">⚙ Settings</button>
+  <h1>XRP–BTC AI Dashboard</h1>
+  <div class="tabs">
+    <button id="tabbtn-pred" onclick="setTab('pred')">Price Predictions</button>
+    <button id="tabbtn-fut" onclick="setTab('fut')">Futures</button>
+    <button id="tabbtn-wal" onclick="setTab('wal')">Followed Wallets</button>
+    <button id="tabbtn-sum" onclick="setTab('sum')">Executive Summary</button>
+    <button id="tabbtn-logs" onclick="setTab('logs')">Logs</button>
+    <button id="tabbtn-copy" onclick="setTab('copy')">Copy Trading</button>
+  </div>
+
+  <div id="tab-pred" style="display:block; margin-top:12px;">
+    <h2>Price Predictions (XRP–BTC Spread)</h2>
+    <div id="predictions"></div>
+  </div>
+  <div id="tab-fut" style="display:none; margin-top:12px;">
+    <h2>Futures</h2>
+    <div id="futures"></div>
+  </div>
+  <div id="tab-wal" style="display:none; margin-top:12px;">
+    <h2>Followed Wallets</h2>
+    <div class="toolbar">
+      <select id="wallet-chain">
+        <option value="solana">Solana</option>
+        <option value="eth">Ethereum</option>
+        <option value="btc">Bitcoin</option>
+        <option value="xrp">XRP</option>
+      </select>
+      <input id="wallet-address" placeholder="Wallet address" size="40" />
+      <input id="wallet-label" placeholder="Label (optional)" size="18" />
+      <button onclick="addWallet()">Add / Follow</button>
+    </div>
+    <div id="wallets"></div>
+  </div>
+  <div id="tab-sum" style="display:none; margin-top:12px;">
+    <h2>Executive Summary</h2>
+    <div id="summary-cards" class="card-grid"></div>
+  </div>
+  <div id="tab-logs" style="display:none; margin-top:12px;">
+    <h2>Live Logs</h2>
+    <select id="log-service">
+      <option value="api-gateway">api-gateway</option>
+      <option value="futures-service">futures-service</option>
+      <option value="wallets-service">wallets-service</option>
+      <option value="summary-service">summary-service</option>
+      <option value="ingest-service">ingest-service</option>
+      <option value="futures-ingest-service">futures-ingest-service</option>
+      <option value="predictor-service">predictor-service</option>
+      <option value="feature-service">feature-service</option>
+      <option value="copy-engine-service">copy-engine-service</option>
+    </select>
+    <select id="log-level">
+      <option value="">ALL</option>
+      <option value="INFO">INFO</option>
+      <option value="WARN">WARN</option>
+      <option value="ERROR">ERROR</option>
+    </select>
+    <button onclick="loadLogs()">Load Logs</button>
+    <pre id="log-output" style="background:#000;color:#0f0;padding:10px;height:400px;overflow:auto;"></pre>
+  </div>
+  <div id="tab-copy" style="display:none; margin-top:12px;">
+    <h2>Copy Trading</h2>
+    <h3>Leader Wallet Settings</h3>
+    <div id="copy-settings"></div>
+    <h3 style="margin-top:16px;">Copy Signals</h3>
+    <div id="copy-signals"></div>
+  </div>
+
+  <div id="settings-overlay" class="settings-overlay">
+    <div class="settings-card">
+      <div class="settings-tabs">
+        <button id="settings-tab-general" onclick="setSettingsTab('general')">General</button>
+        <button id="settings-tab-pred" onclick="setSettingsTab('pred')">Predictions</button>
+        <button id="settings-tab-fut" onclick="setSettingsTab('fut')">Futures</button>
+        <button id="settings-tab-wal" onclick="setSettingsTab('wal')">Wallets</button>
+      </div>
+      <div class="settings-body">
+        <div id="settings-panel-general">
+          <h3>General Settings</h3>
+          <label>Refresh interval (seconds):
+            <input id="set-refresh-interval" type="number" min="5" max="600" />
+          </label>
+        </div>
+        <div id="settings-panel-pred" style="display:none;">
+          <h3>Prediction Settings</h3>
+          <label>Show confidence bands:
+            <input id="set-pred-show-bands" type="checkbox" />
+          </label>
+        </div>
+        <div id="settings-panel-fut" style="display:none;">
+          <h3>Futures Settings</h3>
+          <label>Max rows:
+            <input id="set-fut-max-rows" type="number" min="10" max="500" />
+          </label>
+        </div>
+        <div id="settings-panel-wal" style="display:none;">
+          <h3>Wallet Settings</h3>
+          <label>Highlight active wallets:
+            <input id="set-wal-highlight" type="checkbox" />
+          </label>
+        </div>
+      </div>
+      <div class="settings-footer">
+        <button class="btn-save" onclick="saveSettings()">Save</button>
+        <button class="btn-restore" onclick="restoreDefaults()">Restore defaults</button>
+        <button class="btn-close" onclick="closeSettings()">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const API = 'http://localhost:9000';
+    const DEFAULT_SETTINGS = {
+      refreshInterval: 30,
+      predShowBands: true,
+      futMaxRows: 200,
+      walHighlight: true
+    };
+    let SETTINGS = loadSettingsFromStorage();
+
+    function loadSettingsFromStorage() {
+      try {
+        const raw = localStorage.getItem('aiDashSettings');
+        if (!raw) return { ...DEFAULT_SETTINGS };
+        const parsed = JSON.parse(raw);
+        return Object.assign({}, DEFAULT_SETTINGS, parsed);
+      } catch (e) {
+        console.error('settings parse error', e);
+        return { ...DEFAULT_SETTINGS };
+      }
+    }
+
+    function syncSettingsUI() {
+      document.getElementById('set-refresh-interval').value = SETTINGS.refreshInterval;
+      document.getElementById('set-pred-show-bands').checked = SETTINGS.predShowBands;
+      document.getElementById('set-fut-max-rows').value = SETTINGS.futMaxRows;
+      document.getElementById('set-wal-highlight').checked = SETTINGS.walHighlight;
+    }
+
+    function openSettings() {
+      syncSettingsUI();
+      document.getElementById('settings-overlay').style.display = 'flex';
+      setSettingsTab('general');
+    }
+    function closeSettings() {
+      document.getElementById('settings-overlay').style.display = 'none';
+    }
+    function setSettingsTab(tab) {
+      ['general','pred','fut','wal'].forEach(t => {
+        document.getElementById('settings-panel-' + t).style.display = (t === tab) ? 'block' : 'none';
+        document.getElementById('settings-tab-' + t).classList.toggle('active', t === tab);
+      });
+    }
+    function saveSettings() {
+      SETTINGS.refreshInterval = parseInt(document.getElementById('set-refresh-interval').value || DEFAULT_SETTINGS.refreshInterval, 10);
+      SETTINGS.predShowBands = document.getElementById('set-pred-show-bands').checked;
+      SETTINGS.futMaxRows = parseInt(document.getElementById('set-fut-max-rows').value || DEFAULT_SETTINGS.futMaxRows, 10);
+      SETTINGS.walHighlight = document.getElementById('set-wal-highlight').checked;
+      localStorage.setItem('aiDashSettings', JSON.stringify(SETTINGS));
+      closeSettings();
+    }
+    function restoreDefaults() {
+      SETTINGS = { ...DEFAULT_SETTINGS };
+      syncSettingsUI();
+    }
+
+    function hideAllTabs() {
+      ['pred','fut','wal','sum','logs','copy'].forEach(t => {
+        const tab = document.getElementById('tab-' + t);
+        const btn = document.getElementById('tabbtn-' + t);
+        if (tab) tab.style.display = 'none';
+        if (btn) btn.classList.remove('active');
+      });
+    }
+    function setTab(t) {
+      hideAllTabs();
+      document.getElementById('tab-' + t).style.display = 'block';
+      document.getElementById('tabbtn-' + t).classList.add('active');
+      if (t === 'pred') loadPredictions();
+      if (t === 'fut') loadFutures();
+      if (t === 'wal') loadWallets();
+      if (t === 'sum') loadSummary();
+      if (t === 'logs') {}
+      if (t === 'copy') {
+        loadCopySettings();
+        loadCopySignals();
+      }
+    }
+
+    async function loadPredictions() {
+  const el = document.getElementById('predictions');
+  el.innerHTML = 'Loading...';
+
+  try {
+    const res = await fetch(API + '/api/predictions');
+    const data = await res.json();
+
+    // Convert the backend object into an array the UI expects
+    const rows = [
+      { horizon: "1h", ...data.horizon_1h },
+      { horizon: "4h", ...data.horizon_4h },
+      { horizon: "24h", ...data.horizon_24h }
+    ];
+
+    let html = `
+      <table>
+        <thead>
+          <tr>
+            <th>Horizon</th>
+            <th>μ (exp.)</th>
+            <th>σ (vol)</th>
+            <th>P(up)</th>
+            <th>P(down)</th>
+          </tr>
+        </thead>
+        <tbody>
+    `;
+
+    rows.forEach(p => {
+      html += `
+        <tr>
+          <td>${p.horizon}</td>
+          <td>${p.mu.toFixed(4)}</td>
+          <td>${p.sigma.toFixed(4)}</td>
+          <td class="pill-up">${(p.p_up * 100).toFixed(1)}%</td>
+          <td class="pill-down">${(p.p_down * 100).toFixed(1)}%</td>
+        </tr>
+      `;
+    });
+
+    html += '</tbody></table>';
+    el.innerHTML = html;
+
+  } catch (e) {
+    console.error(e);
+    el.innerHTML = 'Error loading predictions';
+  }
+}
+
+
+    async function loadFutures() {
+      const el = document.getElementById('futures');
+      el.innerHTML = 'Loading...';
+      try {
+        const res = await fetch(API + '/api/futures');
+        const data = await res.json();
+        const raw = data.raw || [];
+        const spread = data.spread_signals || [];
+
+        let rawRows = raw;
+        if (SETTINGS.futMaxRows && rawRows.length > SETTINGS.futMaxRows) {
+          rawRows = rawRows.slice(0, SETTINGS.futMaxRows);
+        }
+
+        let html = '<h3>Raw Exchange Futures (Binance, >10k notional)</h3>';
+        html += '<table><thead><tr><th>Time</th><th>Symbol</th><th>Side</th><th>Price</th><th>Qty</th><th>Notional</th><th>Success%</th></tr></thead><tbody>';
+        rawRows.forEach(r => {
+          html += `<tr>
+            <td>${new Date(r.tx_time).toLocaleString()}</td>
+            <td>${r.symbol}</td>
+            <td>${r.side}</td>
+            <td>${r.price.toFixed(2)}</td>
+            <td>${r.quantity.toFixed(4)}</td>
+            <td>${r.notional_usd.toFixed(2)}</td>
+            <td>${r.success_rate != null ? r.success_rate.toFixed(1) : ''}</td>
+          </tr>`;
+        });
+        html += '</tbody></table>';
+
+        html += '<h3 style="margin-top:16px;">Spread Futures Signals (XRP–BTC)</h3>';
+        html += '<table><thead><tr><th>Time</th><th>Type</th><th>Spread log</th><th>BTC Px</th><th>XRP Px</th><th>BTC Notional</th><th>XRP Notional</th><th>Lev</th><th>TP% / SL%</th><th>μ / σ</th><th>Status</th></tr></thead><tbody>';
+        spread.forEach(s => {
+          html += `<tr>
+            <td>${new Date(s.ts).toLocaleString()}</td>
+            <td>${s.signal_type}</td>
+            <td>${s.spread_log.toFixed(4)}</td>
+            <td>${s.btc_price.toFixed(2)}</td>
+            <td>${s.xrp_price.toFixed(4)}</td>
+            <td>${s.btc_notional.toFixed(2)}</td>
+            <td>${s.xrp_notional.toFixed(2)}</td>
+            <td>${s.leverage != null ? s.leverage.toFixed(1) : ''}</td>
+            <td>${s.tp_roi_pct != null ? s.tp_roi_pct.toFixed(1) : ''} / ${s.sl_roi_pct != null ? s.sl_roi_pct.toFixed(1) : ''}</td>
+            <td>${s.expected_mu != null ? s.expected_mu.toFixed(4) : ''} / ${s.expected_sigma != null ? s.expected_sigma.toFixed(4) : ''}</td>
+            <td>${s.status}</td>
+          </tr>`;
+        });
+        html += '</tbody></table>';
+
+        el.innerHTML = html;
+      } catch (e) {
+        console.error(e);
+        el.innerHTML = 'Error loading futures';
+      }
+    }
+
+    async function loadWallets() {
+      const el = document.getElementById('wallets');
+      el.innerHTML = 'Loading...';
+      try {
+        const res = await fetch(API + '/api/wallets');
+        const data = await res.json();
+        let html = '<table><thead><tr><th>Active</th><th>Chain</th><th>Address</th><th>Label</th></tr></thead><tbody>';
+        data.forEach(w => {
+          const rowStyle = SETTINGS.walHighlight && w.is_active ? 'style="background:#0f172a;"' : '';
+          html += `<tr ${rowStyle}>
+            <td><input type="checkbox" ${w.is_active ? 'checked' : ''} onclick="toggleWallet(${w.id})" /></td>
+            <td>${w.chain}</td>
+            <td>${w.address}</td>
+            <td>${w.label || ''}</td>
+          </tr>`;
+        });
+        html += '</tbody></table>';
+        el.innerHTML = html;
+      } catch (e) {
+        console.error(e);
+        el.innerHTML = 'Error loading wallets';
+      }
+    }
+
+    async function addWallet() {
+      const chain = document.getElementById('wallet-chain').value;
+      const address = document.getElementById('wallet-address').value;
+      const label = document.getElementById('wallet-label').value;
+      if (!address) return;
+      try {
+        await fetch(API + '/api/wallets', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ chain, address, label })
+        });
+        document.getElementById('wallet-address').value = '';
+        document.getElementById('wallet-label').value = '';
+        loadWallets();
+      } catch (e) {
+        console.error(e);
+        alert('Error saving wallet');
+      }
+    }
+
+    async function toggleWallet(id) {
+      try {
+        await fetch(API + '/api/wallets/' + id + '/toggle', { method: 'POST' });
+        loadWallets();
+      } catch (e) {
+        console.error(e);
+        alert('Error toggling wallet');
+      }
+    }
+
+    async function loadSummary() {
+      const el = document.getElementById('summary-cards');
+      el.innerHTML = '';
+      try {
+        const res = await fetch(API + '/api/summary');
+        const data = await res.json();
+        let inner = '';
+        data.cards.forEach(c => {
+          inner += `<div class="card">
+            <h3>${c.title}</h3>
+            <p style="font-size:20px;font-weight:bold;">${c.value}</p>
+          </div>`;
+        });
+        inner += `<div class="card" style="background:#1b263b;">
+            <h3>Live Proposed Trades</h3>
+            <p>Review model-driven spread opportunities and route via Jupiter.</p>
+            <p style="font-size:11px;opacity:0.7;">Informational only, not trading advice.</p>
+            <a class="btn" href="https://jup.ag" target="_blank">Open Jupiter</a>
+          </div>`;
+        el.innerHTML = inner;
+      } catch (e) {
+        console.error(e);
+        el.innerHTML = 'Error loading summary';
+      }
+    }
+
+    async function loadLogs() {
+      const svc = document.getElementById('log-service').value;
+      const lvl = document.getElementById('log-level').value;
+      const el = document.getElementById('log-output');
+      el.textContent = 'Loading...';
+      try {
+        // This assumes you later add /api/logs/{service} in api-gateway
+        const res = await fetch(API + '/api/logs/' + svc);
+        const js = await res.json();
+        let txt = js.log || '';
+        if (lvl) {
+          txt = txt.split('\n').filter(l => l.includes(lvl)).join('\n');
+        }
+        el.textContent = txt;
+      } catch (e) {
+        console.error(e);
+        el.textContent = 'Error loading logs';
+      }
+    }
+
+    async function loadCopySettings() {
+      const el = document.getElementById('copy-settings');
+      el.innerHTML = 'Loading...';
+      try {
+        const res = await fetch(API + '/api/copy/settings');
+        const data = await res.json();
+        let html = '<table><thead><tr><th>ID</th><th>Leader Wallet ID</th><th>Copy range (USD)</th><th>Total SL (USD)</th><th>Autotrade</th></tr></thead><tbody>';
+        data.forEach(s => {
+          html += `<tr>
+            <td>${s.id}</td>
+            <td>${s.leader_wallet_id}</td>
+            <td>${s.copy_amount_min_usd.toFixed(0)} – ${s.copy_amount_max_usd.toFixed(0)}</td>
+            <td>${s.total_stop_loss_usd != null ? s.total_stop_loss_usd.toFixed(0) : ''}</td>
+            <td>
+              <button onclick="toggleAutotrade(${s.id})">
+                ${s.auto_invest ? 'ON' : 'OFF'}
+              </button>
+            </td>
+          </tr>`;
+        });
+        html += '</tbody></table>';
+        el.innerHTML = html;
+      } catch (e) {
+        console.error(e);
+        el.innerHTML = 'Error loading copy settings';
+      }
+    }
+
+    async function toggleAutotrade(id) {
+      try {
+        await fetch(API + '/api/copy/settings/' + id + '/toggle_autotrade', { method: 'POST' });
+        loadCopySettings();
+      } catch (e) {
+        console.error(e);
+        alert('Error toggling autotrade');
+      }
+    }
+
+    async function loadCopySignals() {
+      const el = document.getElementById('copy-signals');
+      el.innerHTML = 'Loading...';
+      try {
+        const res = await fetch(API + '/api/copy/signals?status=proposed');
+        const data = await res.json();
+        let html = '<table><thead><tr><th>ID</th><th>Leader Wallet</th><th>Chain</th><th>Asset</th><th>Side</th><th>Notional</th><th>Lev</th><th>TP% / SL%</th><th>Status</th><th>Set Position</th></tr></thead><tbody>';
+        data.forEach(s => {
+          html += `<tr>
+            <td>${s.id}</td>
+            <td>${s.leader_wallet_id}</td>
+            <td>${s.chain}</td>
+            <td>${s.asset_symbol}</td>
+            <td>${s.side}</td>
+            <td>${s.notional_usd.toFixed(2)}</td>
+            <td>${s.leverage != null ? s.leverage.toFixed(1) : ''}</td>
+            <td>${s.tp_roi_pct != null ? s.tp_roi_pct.toFixed(1) : ''} / ${s.sl_roi_pct != null ? s.sl_roi_pct.toFixed(1) : ''}</td>
+            <td>${s.status}</td>
+            <td><button onclick="setCopyPosition(${s.id})">Set</button></td>
+          </tr>`;
+        });
+        html += '</tbody></table>';
+        el.innerHTML = html;
+      } catch (e) {
+        console.error(e);
+        el.innerHTML = 'Error loading copy signals';
+      }
+    }
+
+    async function setCopyPosition(id) {
+      try {
+        await fetch(API + '/api/copy/signals/' + id + '/set_position', { method: 'POST' });
+        loadCopySignals();
+      } catch (e) {
+        console.error(e);
+        alert('Error setting position');
+      }
+    }
+
+    document.getElementById('tabbtn-pred').classList.add('active');
+    loadPredictions();
+  </script>
+</body>
+</html>

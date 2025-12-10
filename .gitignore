@@ -1,0 +1,30 @@
+# Node
+node_modules/
+
+# Python
+.venv/
+venv/
+env/
+__pycache__/
+
+# Env files
+.env
+.env.*
+
+# Build artifacts
+dist/
+build/
+out/
+
+# Logs
+*.log
+logs/
+
+# IDE / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Sensitive files
+GIT/utils/git-api-key.txt

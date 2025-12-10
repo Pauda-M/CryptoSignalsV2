@@ -1,0 +1,14 @@
+{
+  "name": "crypto-quant-engine",
+  "version": "1.0.0",
+  "type": "module",
+  "main": "src/quantEngine.js",
+  "scripts": {
+    "start": "node src/quantEngine.js"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.0",
+    "node-fetch": "^3.3.2",
+    "pg": "^8.11.5"
+  }
+}

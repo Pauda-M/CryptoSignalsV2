@@ -1,0 +1,39 @@
+{
+  "engine_name": "ai_alpha_signal_engine_v2",
+  "symbols": [
+    "BTCUSDT",
+    "ETHUSDT"
+  ],
+  "market": {
+    "provider": "binance",
+    "interval": "15m",
+    "klines_limit": 200
+  },
+  "alpha_logic": {
+    "price_momentum_weight": 0.4,
+    "social_sentiment_weight": 0.4,
+    "on_chain_weight": 0.2,
+    "direction_thresholds": {
+      "strong_buy": 0.75,
+      "buy": 0.6,
+      "hold": 0.45,
+      "sell": 0.3,
+      "strong_sell": 0.15
+    }
+  },
+  "meme": {
+    "universe": [
+      "DOGE",
+      "SHIB",
+      "PEPE",
+      "FLOKI",
+      "BONK",
+      "WIF"
+    ],
+    "min_alpha_for_buy": 0.6,
+    "min_confidence_for_buy": 0.6
+  },
+  "loop": {
+    "poll_interval_seconds": 60
+  }
+}

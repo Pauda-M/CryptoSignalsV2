@@ -1,0 +1,1 @@
+print('copy trade sim placeholder')

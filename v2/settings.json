@@ -1,0 +1,10 @@
+{
+    "editor.formatOnSave": true,
+    "python.languageServer": "Pylance",
+    "python.analysis.typeCheckingMode": "basic",
+    "files.autoSave": "afterDelay",
+    "eslint.format.enable": true,
+    "prettier.singleQuote": true,
+    "prettier.semi": false,
+    "terminal.integrated.defaultProfile.windows": "PowerShell"
+}

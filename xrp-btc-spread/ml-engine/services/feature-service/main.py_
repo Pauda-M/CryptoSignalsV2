@@ -1,0 +1,25 @@
+
+#!/usr/bin/env python3
+import sys
+from fastapi import FastAPI
+import uvicorn
+
+app = FastAPI(title="Feature Service")
+
+@app.get("/health")
+def health():
+    return {"status": "ok", "service": "Feature Service"}
+
+@app.get("/features")
+def list_features():
+    return {
+        "features": [
+            "spread_log",
+            "xrp_volume_z",
+            "btc_volume_z",
+        ]
+    }
+
+if __name__ == "__main__":
+    port = int(sys.argv[1]) if len(sys.argv) > 1 else 9101
+    uvicorn.run("main:app", host="0.0.0.0", port=port)

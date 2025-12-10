@@ -1,0 +1,11 @@
+CREATE TABLE IF NOT EXISTS copy_executions (
+    id BIGSERIAL PRIMARY KEY,
+    signal_id BIGINT REFERENCES copy_signals(id),
+    entry_price DOUBLE PRECISION,
+    exit_price DOUBLE PRECISION,
+    pnl DOUBLE PRECISION,
+    roi DOUBLE PRECISION,
+    opened_at TIMESTAMPTZ,
+    closed_at TIMESTAMPTZ,
+    raw JSONB
+);

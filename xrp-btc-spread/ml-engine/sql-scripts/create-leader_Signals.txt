@@ -1,0 +1,13 @@
+CREATE TABLE IF NOT EXISTS leader_signals (
+    id BIGSERIAL PRIMARY KEY,
+    wallet_id TEXT,
+    chain TEXT,
+    asset TEXT,
+    direction TEXT,
+    confidence DOUBLE PRECISION,
+    expected_roi DOUBLE PRECISION,
+    horizon TEXT,
+    ts TIMESTAMPTZ NOT NULL,
+    source TEXT,  -- e.g. whale_move | ml_spread | combined
+    raw JSONB
+);

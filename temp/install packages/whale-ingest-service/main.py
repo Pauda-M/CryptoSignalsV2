@@ -1,0 +1,1 @@
+print('whale ingest service placeholder')

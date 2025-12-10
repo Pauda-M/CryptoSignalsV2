@@ -1,0 +1,82 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:15-alpine
+    container_name: crypto-signals-v2-db
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-KarmaKoma2024}
+      POSTGRES_DB: ${DB_NAME:-crypto_signals_v2}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./db/postgres/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql
+      - ./db/seeds/init-seed.sql:/docker-entrypoint-initdb.d/02-seed.sql
+    ports:
+      - "5432:5432"
+    networks:
+      - crypto-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  api-gateway:
+    build:
+      context: .
+      dockerfile: ops/docker/Dockerfile.api
+    container_name: crypto-signals-v2-api
+    environment:
+      NODE_ENV: ${NODE_ENV:-development}
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_USER: postgres
+      DB_PASSWORD: ${DB_PASSWORD:-KarmaKoma2024}
+      DB_NAME: ${DB_NAME:-crypto_signals_v2}
+      API_PORT: 3000
+    ports:
+      - "3000:3000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - crypto-network
+    volumes:
+      - ./services/api-gateway:/app/services/api-gateway
+      - ./config:/app/config
+
+  trading-dashboard:
+    build:
+      context: ./dashboards/trading-dashboard
+      dockerfile: Dockerfile
+    container_name: crypto-signals-v2-trading-ui
+    environment:
+      VITE_API_URL: http://localhost:3000
+    ports:
+      - "5173:5173"
+    depends_on:
+      - api-gateway
+    networks:
+      - crypto-network
+
+  admin-dashboard:
+    build:
+      context: ./dashboards/admin-dashboard
+      dockerfile: Dockerfile
+    container_name: crypto-signals-v2-admin-ui
+    environment:
+      VITE_API_URL: http://localhost:3000
+    ports:
+      - "5174:5174"
+    depends_on:
+      - api-gateway
+    networks:
+      - crypto-network
+
+volumes:
+  postgres_data:
+
+networks:
+  crypto-network:
+    driver: bridge

@@ -1,0 +1,12 @@
+CREATE TABLE IF NOT EXISTS whale_transfers (
+    id BIGSERIAL PRIMARY KEY,
+    chain TEXT NOT NULL,
+    wallet_id TEXT NOT NULL,
+    asset TEXT NOT NULL,
+    amount_usd DOUBLE PRECISION NOT NULL,
+    direction TEXT NOT NULL,  -- deposit | withdrawal | internal
+    exchange_target TEXT,
+    tx_hash TEXT,
+    ts TIMESTAMPTZ NOT NULL,
+    raw JSONB
+);

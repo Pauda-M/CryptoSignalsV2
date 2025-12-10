@@ -1,0 +1,1 @@
+print('whale intel service placeholder')

@@ -1,0 +1,9 @@
+{
+  "whale_threshold_usd": 250000,
+  "chains": ["btc", "eth", "sol", "xrp", "xlm"],
+  "rwa_tokens_eth": ["ONDO", "POLYX", "PYUSD", "USDM", "EURC"],
+  "rwa_tokens_sol": ["ONDO", "USDC", "PYUSD"],
+  "exchanges": ["binance", "coinbase"],
+  "market_assets": ["BTC", "ETH", "XRP", "XLM", "SOL"],
+  "timeframes": ["1h", "15m"]
+}

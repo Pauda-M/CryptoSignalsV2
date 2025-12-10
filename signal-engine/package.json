@@ -1,0 +1,14 @@
+{
+  "name": "crypto-signal-engine-v5",
+  "version": "5.0.0",
+  "type": "module",
+  "main": "src/engine.js",
+  "scripts": {
+    "start": "node src/engine.js"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.0",
+    "node-fetch": "^3.3.2",
+    "onnxruntime-node": "^1.17.0"
+  }
+}

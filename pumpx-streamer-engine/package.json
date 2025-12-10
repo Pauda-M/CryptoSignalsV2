@@ -1,0 +1,17 @@
+{
+  "name": "pumpx-streamer",
+  "version": "1.0.0",
+  "type": "module",
+  "main": "src/wssStreamer.js",
+  "scripts": {
+    "dev": "node src/wssStreamer.js",
+    "start": "node src/wssStreamer.js"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.0",
+    "express": "^4.19.0",
+    "pg": "^8.12.0",
+    "socket.io": "^4.7.5"
+  }
+}

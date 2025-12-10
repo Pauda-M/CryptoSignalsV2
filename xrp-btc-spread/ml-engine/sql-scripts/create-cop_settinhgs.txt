@@ -1,0 +1,10 @@
+CREATE TABLE IF NOT EXISTS copy_settings (
+    id BIGSERIAL PRIMARY KEY,
+    wallet_id TEXT NOT NULL,
+    asset TEXT,
+    autopilot BOOLEAN DEFAULT FALSE,
+    max_notional_usd DOUBLE PRECISION,
+    min_confidence DOUBLE PRECISION DEFAULT 0.65,
+    active BOOLEAN DEFAULT TRUE,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);

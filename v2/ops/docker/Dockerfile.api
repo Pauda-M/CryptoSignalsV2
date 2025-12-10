@@ -1,0 +1,21 @@
+FROM node:18-alpine
+
+WORKDIR /app
+
+# Copy config
+COPY config ./config
+
+# Copy API Gateway
+COPY services/api-gateway ./services/api-gateway
+COPY package.json ./
+
+# Install dependencies
+RUN npm ci
+WORKDIR /app/services/api-gateway
+RUN npm ci
+
+WORKDIR /app
+
+EXPOSE 3000
+
+CMD ["node", "services/api-gateway/src/server.js"]

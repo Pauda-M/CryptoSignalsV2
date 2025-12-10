@@ -1,0 +1,12 @@
+CREATE TABLE IF NOT EXISTS rwa_transfers_eth (
+    id BIGSERIAL PRIMARY KEY,
+    token TEXT NOT NULL,
+    wallet_from TEXT,
+    wallet_to TEXT,
+    amount DOUBLE PRECISION,
+    amount_usd DOUBLE PRECISION,
+    ts TIMESTAMPTZ NOT NULL,
+    tx_hash TEXT,
+    raw JSONB,
+    UNIQUE(tx_hash, wallet_from, wallet_to, amount)
+);

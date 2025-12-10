@@ -1,0 +1,12 @@
+CREATE TABLE IF NOT EXISTS copy_signals (
+    id BIGSERIAL PRIMARY KEY,
+    leader_signal_id BIGINT REFERENCES leader_signals(id),
+    wallet_id TEXT,
+    asset TEXT,
+    direction TEXT,
+    entry_price DOUBLE PRECISION,
+    confidence DOUBLE PRECISION,
+    expected_roi DOUBLE PRECISION,
+    status TEXT DEFAULT 'pending',  -- pending | executed | closed
+    ts TIMESTAMPTZ NOT NULL
+);
