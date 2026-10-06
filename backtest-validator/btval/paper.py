@@ -154,6 +154,9 @@ def equity_curve(sess: dict, led: pd.DataFrame, prices: pd.Series) -> pd.Series:
     return pd.Series(eq, index=px.index)
 
 
+MAX_ATTEMPTS = 3
+
+
 def _place(store: Store, venue: SimVenue, sess: dict, bar_ts: pd.Timestamp, kind: str,
            signal: float | None, target_qty: float, cur_qty: float, price: float) -> dict:
     sid = sess["id"]
@@ -161,11 +164,26 @@ def _place(store: Store, venue: SimVenue, sess: dict, bar_ts: pd.Timestamp, kind
     row = dict(session_id=sid, bar_ts=bar_ts.to_pydatetime(), created_at=_now(), status="pending",
                kind=kind, symbol=sess["symbol"], signal=signal, target_qty=target_qty, prev_qty=cur_qty,
                decision_price=price, client_order_id=coid)
+    attempt = 1
     try:
         with store.engine.begin() as cx:  # reserve the decision first
             oid = cx.execute(insert(paper_orders).values(**row)).inserted_primary_key[0]
     except IntegrityError:
-        return {"status": "already_decided", "bar_ts": str(bar_ts), "kind": kind}
+        # A decision that errored before any fill may be retried (bounded); a
+        # filled / no_trade / pending decision is final for this bar.
+        with store.engine.begin() as cx:
+            prev = cx.execute(select(paper_orders).where(
+                paper_orders.c.session_id == sid, paper_orders.c.bar_ts == row["bar_ts"],
+                paper_orders.c.kind == kind)).first()
+            prev = dict(prev._mapping) if prev else None
+            attempts = (prev.get("note") or "").count("attempt ") + 1 if prev else 0
+            if not prev or prev["status"] != "error" or prev["venue_order_id"] or attempts >= MAX_ATTEMPTS:
+                return {"status": "already_decided", "bar_ts": str(bar_ts), "kind": kind}
+            cx.execute(update(paper_orders).where(paper_orders.c.id == prev["id"]).values(
+                status="pending", created_at=_now(), signal=signal, target_qty=target_qty, prev_qty=cur_qty,
+                decision_price=price, note=f"{prev['note']} | attempt {attempts + 1}"))
+            oid = prev["id"]
+            attempt = attempts + 1
 
     filt = venue.filters(sess["symbol"])
     delta = target_qty - cur_qty
@@ -204,7 +222,7 @@ def _place(store: Store, venue: SimVenue, sess: dict, bar_ts: pd.Timestamp, kind
             exe_total = notional = 0.0
             raws = []
             for i, (lq, ro) in enumerate(legs):
-                r = venue.market_order(sess["symbol"], lq, f"{coid}-{i}", reduce_only=ro)
+                r = venue.market_order(sess["symbol"], lq, f"{coid}-a{attempt}-{i}", reduce_only=ro)
                 raws.append(r)
                 ex = float(r["executedQty"]) * np.sign(lq)
                 exe_total += ex
@@ -223,6 +241,10 @@ def _place(store: Store, venue: SimVenue, sess: dict, bar_ts: pd.Timestamp, kind
                        note="; ".join(note) or None, venue_raw=r)
         except Exception as e:  # noqa: BLE001 -- recorded, never swallowed silently
             upd.update(status="error", note=f"{type(e).__name__}: {e}")
+    with store.engine.connect() as cx:
+        prior = cx.execute(select(paper_orders.c.note).where(paper_orders.c.id == oid)).scalar()
+    if prior:  # keep the retry history; append this attempt's outcome
+        upd["note"] = f"{prior} -> {upd['note']}" if upd.get("note") else prior
     with store.engine.begin() as cx:
         cx.execute(update(paper_orders).where(paper_orders.c.id == oid).values(**upd))
     return {"status": upd["status"], "bar_ts": str(bar_ts), "kind": kind, "order_qty": qty,

@@ -80,7 +80,14 @@ class SimVenue:
         p = {**params, "timestamp": int(time.time() * 1000), "recvWindow": 30000}
         qs = urllib.parse.urlencode(p)
         sig = hmac.new(self.secret, qs.encode(), hashlib.sha256).hexdigest()
-        r = self.http.request(method, f"{path}?{qs}&signature={sig}", headers={"X-MBX-APIKEY": self.key})
+        headers = {"X-MBX-APIKEY": self.key}
+        if method == "POST":
+            # Binance accepts signed params in the query or the body; pbFinance
+            # reads POST params from the body only.
+            headers["Content-Type"] = "application/x-www-form-urlencoded"
+            r = self.http.request(method, path, content=f"{qs}&signature={sig}", headers=headers)
+        else:
+            r = self.http.request(method, f"{path}?{qs}&signature={sig}", headers=headers)
         body = r.json()
         if r.status_code >= 400 or (isinstance(body, dict) and body.get("code", 0) < 0):
             raise RuntimeError(f"venue error {r.status_code}: {body}")

@@ -183,3 +183,15 @@ def test_unvalidated_session_gets_kill_from_oos(store):
     from btval.paper import list_sessions
     s = next(x for x in list_sessions(store) if x["id"] == sid)
     assert s["unvalidated"] and s["kill_conditions"]["max_dd_pct_limit"] == -30.0
+
+
+def test_errored_decision_is_retried_bounded(store):
+    fake = FakePbFinance(_uptrend())
+    fake.reject_next = True
+    sid = _session(store)
+    assert tick(store, _venue(fake), sid)["order"]["status"] == "error"
+    out = tick(store, _venue(fake), sid)            # same bar: retried, fills
+    assert out["order"]["status"] == "filled" and len(fake.orders) == 1
+    assert tick(store, _venue(fake), sid)["order"]["status"] == "already_decided"
+    led = ledger(store, sid)
+    assert len(led) == 1 and "attempt 2" in led.iloc[0]["note"]

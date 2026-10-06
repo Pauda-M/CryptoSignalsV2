@@ -39,6 +39,8 @@ class FakePbFinance:
     def handler(self, req: httpx.Request) -> httpx.Response:
         path = req.url.path
         q = dict(urllib.parse.parse_qsl(req.url.query.decode()))
+        if req.method == "POST":  # like pbFinance: POST params come from the body ONLY
+            q = dict(urllib.parse.parse_qsl(req.content.decode()))
         if path == "/fapi/v1/klines":
             return httpx.Response(200, json=self._klines(int(q.get("limit", 500))))
         if path == "/fapi/v1/exchangeInfo":
