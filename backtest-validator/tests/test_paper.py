@@ -195,3 +195,18 @@ def test_errored_decision_is_retried_bounded(store):
     assert tick(store, _venue(fake), sid)["order"]["status"] == "already_decided"
     led = ledger(store, sid)
     assert len(led) == 1 and "attempt 2" in led.iloc[0]["note"]
+
+
+def test_snapshot_reflects_retried_fill_and_refreshes(store):
+    from btval.paper import equity_series, list_sessions
+    fake = FakePbFinance(_uptrend())
+    fake.reject_next = True
+    sid = _session(store)
+    tick(store, _venue(fake), sid)                    # error -> snapshot flat
+    first = equity_series(store, sid)[0]
+    tick(store, _venue(fake), sid)                    # retry fills, same bar
+    eq = equity_series(store, sid)
+    assert len(eq) == 1 and eq[0]["position_qty"] > 0
+    assert eq[0]["recorded_at"] >= first["recorded_at"]
+    s = next(x for x in list_sessions(store) if x["id"] == sid)
+    assert s["position_qty"] > 0

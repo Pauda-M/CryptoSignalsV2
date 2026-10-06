@@ -311,15 +311,18 @@ def _snapshot(store: Store, sess: dict, bar_ts, price: float, sig: float, h: dic
         peak = cx.execute(select(paper_equity.c.equity).where(paper_equity.c.session_id == sess["id"])
                           .order_by(paper_equity.c.equity.desc()).limit(1)).scalar()
     peak = max(float(peak or 0), float(sess["initial_capital"]), equity)
+    vals = dict(recorded_at=_now(), price=price, position_qty=q, equity=equity,
+                drawdown_pct=(equity / peak - 1) * 100, signal=sig, action=(h or {}).get("action"),
+                alerts=(h or {}).get("alerts", []), reconcile_diverged=diverged)
+    # Upsert: every tick refreshes this bar's row, so a fill that lands after
+    # the first attempt (retry) and the "last tick" time are both current.
     try:
         with store.engine.begin() as cx:
-            cx.execute(insert(paper_equity).values(
-                session_id=sess["id"], bar_ts=bar_ts.to_pydatetime(), recorded_at=_now(), price=price,
-                position_qty=q, equity=equity, drawdown_pct=(equity / peak - 1) * 100, signal=sig,
-                action=(h or {}).get("action"), alerts=(h or {}).get("alerts", []),
-                reconcile_diverged=diverged))
+            cx.execute(insert(paper_equity).values(session_id=sess["id"], bar_ts=bar_ts.to_pydatetime(), **vals))
     except IntegrityError:
-        pass  # this bar already recorded
+        with store.engine.begin() as cx:
+            cx.execute(update(paper_equity).where(paper_equity.c.session_id == sess["id"],
+                                                  paper_equity.c.bar_ts == bar_ts.to_pydatetime()).values(**vals))
 
 
 def trade_stats(sess: dict, led: pd.DataFrame, mark: float | None = None) -> dict:
