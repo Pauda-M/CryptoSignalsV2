@@ -174,3 +174,12 @@ def test_flip_uses_reduce_only_then_open(store):
     assert flip, "reducing leg must be reduceOnly"
     led = ledger(store, sid)
     assert np.isclose(led[led.status == "filled"]["venue_executed_qty"].sum(), fake.position, atol=1e-9)
+
+
+def test_unvalidated_session_gets_kill_from_oos(store):
+    rid = store.save_run("strategy", "sma_cross", {"verdict": "REJECT", "kill_conditions": None,
+        "walk_forward": {"oos_metrics": {"sharpe_per_period": 0.03, "max_drawdown_pct": -20.0}}})
+    sid = _session(store, run_id=rid, allow_unvalidated=True)
+    from btval.paper import list_sessions
+    s = next(x for x in list_sessions(store) if x["id"] == sid)
+    assert s["unvalidated"] and s["kill_conditions"]["max_dd_pct_limit"] == -30.0

@@ -56,6 +56,13 @@ def create_session(store: Store, *, strategy: str, params: dict, symbol: str, in
         if run["verdict"] != "DEPLOYABLE" and not allow_unvalidated:
             raise ValueError(f"run {validation_run_id} verdict is {run['verdict']}; refusing to paper-trade it")
         kill = run["kill_conditions"]
+        if kill is None:
+            # A rejected run carries no kill conditions; an unvalidated session
+            # still gets a stop, derived from the run's out-of-sample stats.
+            oos = ((run.get("report") or {}).get("walk_forward") or {}).get("oos_metrics") or {}
+            if "sharpe_per_period" in oos and "max_drawdown_pct" in oos:
+                from .health import kill_conditions
+                kill = kill_conditions(oos)
     elif not allow_unvalidated:
         raise ValueError("validation_run_id required (or allow_unvalidated=true, which is recorded)")
     mode = cost_model.get("mode", "fixed")
