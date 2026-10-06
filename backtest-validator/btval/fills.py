@@ -14,8 +14,9 @@ def _sign(direction: pd.Series) -> pd.Series:
     return np.where(direction.str.lower().str.startswith("l"), 1.0, -1.0)
 
 
-# A price more than this factor away from the position's own entry is not a
-# fill, it is a bad write (seen live: SOL short entry 95.60, exit 1542.24).
+# Safety net: a price more than this factor away from the position's own entry
+# is not a fill. (The live "exit 1542" turned out to be a grouping bug, fixed
+# by POSITION_KEY; this stays to catch genuinely bad rows.)
 SUSPECT_FACTOR = 3.0
 
 
@@ -43,23 +44,30 @@ def clean(df: pd.DataFrame) -> tuple[pd.DataFrame, list[dict]]:
     bad = suspect_rows(df)
     if bad.empty:
         return df, []
-    keys = set(zip(bad["venue"], bad["source_db"], bad["position_id"]))
-    keep = ~pd.Series([k in keys for k in zip(df["venue"], df["source_db"], df["position_id"])], index=df.index)
+    keys = set(zip(bad["venue"], bad["source_db"], bad["position_id"], bad["symbol"]))
+    keep = ~pd.Series([k in keys for k in zip(df["venue"], df["source_db"], df["position_id"], df["symbol"])],
+                      index=df.index)
     rows = bad.assign(closed_at=bad["closed_at"].astype(str)).to_dict("records")
     return df[keep], rows
+
+
+# position_id alone is NOT unique in ChromeOmega's log: two strategies reused
+# ids on 2026-05-11 (an ETH trade merged into a SOL short gave "exit 1542").
+POSITION_KEY = ["venue", "source_db", "session_id", "position_id", "symbol"]
 
 
 def positions(df: pd.DataFrame) -> pd.DataFrame:
     """Collapse partial-close rows into one row per position."""
     if df.empty:
         return df
-    key = ["venue", "source_db", "position_id"]
+    key = POSITION_KEY
     d = df.copy()
     d["position_id"] = d["position_id"].fillna(-d["source_row_id"])
+    d["session_id"] = d["session_id"].fillna(-1) if "session_id" in d else -1
     d["_exit_w"] = d["exit_price"] * d["notional_usd"]
     g = d.groupby(key, dropna=False)
     out = g.agg(
-        symbol=("symbol", "first"), direction=("direction", "first"),
+        direction=("direction", "first"),
         strategy_id=("strategy_id", "first"), strategy_name=("strategy_name", "first"),
         signal_price=("signal_price", "first"), entry_price=("entry_price", "first"),
         signal_bucket_ts=("signal_bucket_ts", "first"), opened_at=("opened_at", "min"),
@@ -182,8 +190,10 @@ def performance(df: pd.DataFrame, by: str = "strategy_name") -> dict:
     p = positions(df)
     if p.empty:
         return {"rows": [], "excluded_rows": excluded}
-    margin = df.groupby(["venue", "source_db", "position_id"])["size_usd"].sum().rename("margin_usd")
-    p = p.join(margin, on=["venue", "source_db", "position_id"])
+    d = df.assign(position_id=df["position_id"].fillna(-df["source_row_id"]),
+                  session_id=df["session_id"].fillna(-1) if "session_id" in df else -1)
+    margin = d.groupby(POSITION_KEY, dropna=False)["size_usd"].sum().rename("margin_usd")
+    p = p.join(margin, on=POSITION_KEY)
 
     def agg(g: pd.DataFrame) -> dict:
         wins, losses = g.loc[g["pnl_usd"] > 0, "pnl_usd"], g.loc[g["pnl_usd"] < 0, "pnl_usd"]

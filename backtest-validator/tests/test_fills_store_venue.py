@@ -146,3 +146,14 @@ def test_performance_scoreboard(store):
     assert t["pnl_usd"] == pytest.approx(8.5)
     assert t["roi_on_margin_pct"] == pytest.approx(8.5 / 400 * 100, abs=0.01)
     assert t["profit_factor"] == pytest.approx(14 / 5.5, rel=1e-3)
+
+
+def test_reused_position_id_across_symbols_not_merged(store):
+    rows = _rows()
+    # same position_id as the SOL long, different strategy/symbol (seen live 2026-05-11)
+    rows.append(dict(rows[0], id=10, position_id=1, symbol="ETHUSDT", strategy_name="other", session_id=99,
+                     signal_price=2500.0, entry_price=2501.0, exit_price=2520.0))
+    store.upsert_fills(rows, "binance", "prod")
+    p = positions(store.load_fills())
+    assert len(p) == 3
+    assert p["exit_vwap"].max() < 3000 and calibrate(store.load_fills())["excluded_rows"] == []
