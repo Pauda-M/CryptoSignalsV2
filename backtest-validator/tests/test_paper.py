@@ -128,3 +128,21 @@ def test_rebalance_band_skips_equity_drift(store):
     out = tick(store, _venue(fake), sid)
     assert out["order"]["status"] == "no_trade" and "band" in out["order"]["note"]
     assert len(fake.orders) == 1
+
+
+def test_trade_stats_round_trip():
+    import pandas as pd
+
+    from btval.paper import trade_stats
+    led = pd.DataFrame([
+        dict(id=1, bar_ts=1, status="filled", venue_executed_qty=1.0, realistic_price=100.0, fee_usd=0.1),
+        dict(id=2, bar_ts=2, status="filled", venue_executed_qty=-1.0, realistic_price=110.0, fee_usd=0.1),
+        dict(id=3, bar_ts=3, status="filled", venue_executed_qty=-1.0, realistic_price=110.0, fee_usd=0.1),
+        dict(id=4, bar_ts=4, status="filled", venue_executed_qty=1.0, realistic_price=115.0, fee_usd=0.1),
+        dict(id=5, bar_ts=5, status="filled", venue_executed_qty=2.0, realistic_price=100.0, fee_usd=0.1),
+    ])
+    st = trade_stats({"initial_capital": 1000.0}, led, mark=105.0)
+    assert st["round_trips"] == 2 and st["win_rate"] == 0.5
+    assert st["realized_pnl_usd"] == pytest.approx(10 - 5 - 0.5)
+    assert st["unrealized_pnl_usd"] == pytest.approx(10.0)
+    assert st["roi_pct"] == pytest.approx((4.5 + 10) / 1000 * 100)

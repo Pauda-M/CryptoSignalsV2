@@ -246,6 +246,50 @@ def _snapshot(store: Store, sess: dict, bar_ts, price: float, sig: float, h: dic
         pass  # this bar already recorded
 
 
+def trade_stats(sess: dict, led: pd.DataFrame, mark: float | None = None) -> dict:
+    """Round trips from the order ledger (average-cost), win rate, PnL, ROI."""
+    f = led[led["status"] == "filled"].sort_values(["bar_ts", "id"]) if not led.empty else led
+    pos = avg = 0.0
+    realized = fees = 0.0
+    trip_pnl = 0.0
+    trips: list[float] = []
+    for _, o in (f.iterrows() if not f.empty else []):
+        q, px, fee = float(o["venue_executed_qty"]), float(o["realistic_price"]), float(o["fee_usd"] or 0)
+        fees += fee
+        trip_pnl -= fee
+        if pos == 0 or np.sign(q) == np.sign(pos):
+            avg = (avg * abs(pos) + px * abs(q)) / (abs(pos) + abs(q))
+            pos += q
+            continue
+        closing = min(abs(q), abs(pos))
+        pnl = closing * (px - avg) * np.sign(pos)
+        realized += pnl
+        trip_pnl += pnl
+        pos += q
+        if abs(pos) < 1e-12 or np.sign(pos) == np.sign(q):  # flat, or flipped through zero
+            trips.append(trip_pnl)
+            trip_pnl = 0.0
+            avg = px if abs(pos) > 1e-12 else 0.0
+    unreal = pos * (mark - avg) if (mark is not None and pos) else 0.0
+    wins = [t for t in trips if t > 0]
+    losses = [t for t in trips if t < 0]
+    total = realized - fees + unreal
+    cap = float(sess["initial_capital"])
+    return {
+        "round_trips": len(trips),
+        "win_rate": round(len(wins) / len(trips), 4) if trips else None,
+        "realized_pnl_usd": round(realized - fees, 2),
+        "unrealized_pnl_usd": round(unreal, 2),
+        "total_pnl_usd": round(total, 2),
+        "fees_usd": round(fees, 2),
+        "roi_pct": round(total / cap * 100, 3) if cap else None,
+        "profit_factor": round(sum(wins) / -sum(losses), 3) if losses else None,
+        "avg_win_usd": round(float(np.mean(wins)), 2) if wins else None,
+        "avg_loss_usd": round(float(np.mean(losses)), 2) if losses else None,
+        "open_qty": pos, "avg_entry": avg if pos else None,
+    }
+
+
 def list_sessions(store: Store) -> list[dict]:
     with store.engine.connect() as cx:
         sess = [dict(r._mapping) for r in cx.execute(select(paper_sessions).order_by(paper_sessions.c.id.desc()))]
@@ -269,6 +313,7 @@ def list_sessions(store: Store) -> list[dict]:
                 "return_pct": (last["equity"] / s["initial_capital"] - 1) * 100 if last else None,
                 "last_action": last.get("action"), "last_alerts": last.get("alerts"),
                 "reconcile_diverged": last.get("reconcile_diverged"),
+                "stats": trade_stats(s, ledger(store, s["id"]), last.get("price")),
             })
     return out
 

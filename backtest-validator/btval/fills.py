@@ -170,3 +170,40 @@ def venue_gap(df: pd.DataFrame, a: str, b: str) -> dict:
     out["read"] = ("Unmatched positions mean the venues disagree on WHETHER a trade happened (fill model); "
                    "matched diffs show how much they disagree on price.")
     return out
+
+
+def performance(df: pd.DataFrame, by: str = "strategy_name") -> dict:
+    """Per-strategy scoreboard from real fills: trades, win rate, PnL, ROI.
+
+    ROI is on margin (size_usd = notional / leverage), the capital actually
+    committed. Net bps is on notional, the number the cost model speaks.
+    """
+    df, excluded = clean(df)
+    p = positions(df)
+    if p.empty:
+        return {"rows": [], "excluded_rows": excluded}
+    margin = df.groupby(["venue", "source_db", "position_id"])["size_usd"].sum().rename("margin_usd")
+    p = p.join(margin, on=["venue", "source_db", "position_id"])
+
+    def agg(g: pd.DataFrame) -> dict:
+        wins, losses = g.loc[g["pnl_usd"] > 0, "pnl_usd"], g.loc[g["pnl_usd"] < 0, "pnl_usd"]
+        m = float(g["margin_usd"].sum())
+        notional = float(g["notional_usd"].sum())
+        return {
+            "trades": int(len(g)),
+            "win_rate": round(float((g["pnl_usd"] > 0).mean()), 4),
+            "pnl_usd": round(float(g["pnl_usd"].sum()), 2),
+            "fees_usd": round(float(g["fee_usd"].sum()), 2),
+            "roi_on_margin_pct": round(float(g["pnl_usd"].sum()) / m * 100, 2) if m > 0 else None,
+            "net_bps_on_notional": round(float(g["pnl_usd"].sum()) / notional * 1e4, 2) if notional > 0 else None,
+            "profit_factor": round(float(wins.sum() / -losses.sum()), 3) if len(losses) and losses.sum() < 0 else None,
+            "avg_win_usd": round(float(wins.mean()), 2) if len(wins) else None,
+            "avg_loss_usd": round(float(losses.mean()), 2) if len(losses) else None,
+            "best_usd": round(float(g["pnl_usd"].max()), 2),
+            "worst_usd": round(float(g["pnl_usd"].min()), 2),
+            "first": str(g["opened_at"].min()), "last": str(g["closed_at"].max()),
+        }
+
+    rows = [{by: k, **agg(g)} for k, g in p.groupby(by, dropna=False)]
+    rows.sort(key=lambda r: r["pnl_usd"])
+    return {"total": agg(p), "rows": rows, "excluded_rows": excluded}

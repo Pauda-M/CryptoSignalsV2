@@ -133,3 +133,16 @@ def test_pg_bar_loader_drops_forming_bar(monkeypatch):
     assert any("still-forming" in n for n in notes)
     with pytest.raises(ValueError):
         data.load_pg_bars("x", "bad; drop table", 5, "open")
+
+
+def test_performance_scoreboard(store):
+    from btval.fills import performance
+    for r in (rows := _rows()):
+        r["size_usd"] = r["notional_usd"] / 5
+    store.upsert_fills(rows, "binance", "prod")
+    perf = performance(store.load_fills())
+    t = perf["total"]
+    assert t["trades"] == 2 and t["win_rate"] == 0.5
+    assert t["pnl_usd"] == pytest.approx(8.5)
+    assert t["roi_on_margin_pct"] == pytest.approx(8.5 / 400 * 100, abs=0.01)
+    assert t["profit_factor"] == pytest.approx(14 / 5.5, rel=1e-3)

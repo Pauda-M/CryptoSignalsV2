@@ -82,6 +82,17 @@ tbody tr.click:hover { background: var(--surface-2); }
 .legend span.dash::before { background: repeating-linear-gradient(90deg, var(--c) 0 4px, transparent 4px 7px); }
 .stack > * + * { margin-top: 16px; }
 .read { font-size: 12px; color: var(--text-secondary); margin: 6px 0 0; }
+.pos { color: var(--good); } .neg { color: var(--critical); }
+.filters { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-bottom: 12px; }
+.seg button[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); }
+form.new { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 10px 12px; margin-top: 12px; }
+form.new label { display: grid; gap: 4px; font-size: 12px; color: var(--text-secondary); }
+form.new input, form.new select { font: inherit; color: var(--text-primary); background: var(--surface-2); border: 1px solid var(--border);
+  border-radius: 6px; padding: 6px 8px; width: 100%; }
+form.new .actions { grid-column: 1 / -1; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+form.new .primary { background: var(--accent); color: #111; border-color: var(--accent); font-weight: 600; }
+.msg { font-size: 13px; }
+details > summary { cursor: pointer; color: var(--text-secondary); font-size: 13px; }
 </style>
 </head>
 <body>
@@ -99,11 +110,51 @@ tbody tr.click:hover { background: var(--surface-2); }
   <section class="alerts" id="alerts" aria-live="polite"></section>
 
   <section class="panel">
+    <h2>ChromeOmega trade performance <span class="muted">(synced trade log — venue not recorded by ChromeOmega: may mix Binance and pbFinance)</span></h2>
+    <div class="filters">
+      <span class="muted">Period</span>
+      <div class="seg" role="group" aria-label="Period">
+        <button type="button" data-days="7">7d</button><button type="button" data-days="30">30d</button>
+        <button type="button" data-days="90">90d</button><button type="button" data-days="0">All</button>
+      </div>
+      <span class="muted" id="perf-window"></span>
+    </div>
+    <div class="tiles" id="perf-tiles"></div>
+    <div class="table-wrap"><table id="perf">
+      <thead><tr><th>Strategy</th><th class="num">Trades</th><th class="num">Win rate</th><th class="num">PnL $</th>
+        <th class="num">ROI on margin</th><th class="num">Net bps</th><th class="num">Profit factor</th><th class="num">Avg win $</th>
+        <th class="num">Avg loss $</th><th class="num">Fees $</th><th>Last trade</th></tr></thead><tbody></tbody></table></div>
+    <p class="read" id="perf-note"></p>
+  </section>
+
+  <section class="panel">
     <h2>Paper sessions</h2>
     <div class="table-wrap"><table id="sessions">
-      <thead><tr><th>ID</th><th>Status</th><th>Strategy</th><th>Symbol</th><th class="num">Equity</th><th class="num">Return</th>
+      <thead><tr><th>ID</th><th>Status</th><th>Strategy</th><th>Symbol</th><th class="num">Start $</th><th class="num">Equity</th>
+        <th class="num">PnL $</th><th class="num">ROI</th><th class="num">Win rate</th><th class="num">Trips</th>
         <th class="num">Drawdown</th><th class="num">Kill at</th><th>Last bar</th><th>Validation</th></tr></thead>
       <tbody></tbody></table></div>
+    <details id="new-wrap" style="margin-top:12px">
+      <summary>New paper session</summary>
+      <form class="new" id="new-session" autocomplete="off">
+        <label>Strategy<select name="strategy" required></select></label>
+        <label>Symbol<input name="symbol" value="BTCUSDT" required pattern="[A-Z0-9]{5,20}"></label>
+        <label>Interval<select name="interval"><option>1d</option><option>4h</option><option>1h</option><option>15m</option></select></label>
+        <label>Starting equity ($)<input name="initial_capital" type="number" min="100" step="100" value="10000" required></label>
+        <label>Max leverage<input name="max_leverage" type="number" min="0.1" max="5" step="0.1" value="1"></label>
+        <label>Max order notional ($)<input name="max_order_notional" type="number" min="10" step="10" value="5000"></label>
+        <label>Validation run<select name="validation_run_id"></select></label>
+        <label>Cost calibration<select name="calibration_id"></select></label>
+        <label>Slippage model<select name="cost_mode"><option value="fixed">fixed (mean)</option>
+          <option value="empirical">empirical (sampled)</option><option value="none">none</option></select></label>
+        <div class="actions">
+          <button type="submit" class="primary">Create session</button>
+          <label style="display:flex;gap:6px;align-items:center"><input type="checkbox" name="allow_unvalidated"> allow without a DEPLOYABLE run (labelled forever)</label>
+          <span class="msg" id="new-msg" role="status"></span>
+        </div>
+      </form>
+      <p class="read">Orders go to pbFinance only, placed by the btval-runner on each closed bar. Creating a session places nothing by itself.</p>
+    </details>
   </section>
 
   <section class="panel" id="detail">
@@ -159,6 +210,9 @@ tbody tr.click:hover { background: var(--surface-2); }
   const esc = (v) => String(v ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
   const num = (v, d = 2) => (v === null || v === undefined || Number.isNaN(+v)) ? "—" : (+v).toLocaleString(undefined, { minimumFractionDigits: d, maximumFractionDigits: d });
   const pct = (v, d = 2) => (v === null || v === undefined) ? "—" : `${+v >= 0 ? "+" : ""}${num(v, d)}%`;
+  const money = (v) => (v === null || v === undefined) ? "—" : `${+v < 0 ? "−" : ""}$${num(Math.abs(+v))}`;
+  const signCls = (v) => v == null ? "" : +v > 0 ? "pos" : +v < 0 ? "neg" : "";
+  const rate = (v) => v == null ? "—" : `${num(v * 100, 1)}%`;
   const ts = (v) => v ? new Date(v).toISOString().replace("T", " ").slice(0, 16) + "Z" : "—";
   const ago = (v) => {
     if (!v) return "—";
@@ -196,7 +250,8 @@ tbody tr.click:hover { background: var(--surface-2); }
   });
 
   // ---- data -------------------------------------------------------------
-  let state = { sessions: [], runs: [], cals: [], sel: null, equity: [], orders: [] };
+  let state = { sessions: [], runs: [], cals: [], sel: null, equity: [], orders: [], perf: null, strategies: [], days: 30 };
+  try { const d = localStorage.getItem("btval-days"); if (d !== null) state.days = +d; } catch (_) {}
   try { const s = +localStorage.getItem("btval-sel"); if (s) state.sel = s; } catch (_) {}
 
   async function j(url) {
@@ -207,8 +262,10 @@ tbody tr.click:hover { background: var(--surface-2); }
 
   async function load() {
     try {
-      const [sessions, runs, cals] = await Promise.all([j("paper/sessions"), j("runs?limit=20"), j("calibrations?limit=10")]);
-      state.sessions = sessions; state.runs = runs; state.cals = cals;
+      const since = state.days ? `&since=${new Date(Date.now() - state.days * 864e5).toISOString().slice(0, 10)}` : "";
+      const [sessions, runs, cals, perf, strategies] = await Promise.all([j("paper/sessions"), j("runs?limit=50"),
+        j("calibrations?limit=20"), j(`fills/performance?venue=${since}`), state.strategies.length ? state.strategies : j("strategies")]);
+      state.sessions = sessions; state.runs = runs; state.cals = cals; state.perf = perf; state.strategies = strategies;
       if (!state.sel || !sessions.some((s) => s.id === state.sel)) state.sel = sessions[0]?.id ?? null;
       if (state.sel) {
         [state.equity, state.orders] = await Promise.all([j(`paper/sessions/${state.sel}/equity`), j(`paper/sessions/${state.sel}/orders?limit=50`)]);
@@ -238,6 +295,9 @@ tbody tr.click:hover { background: var(--surface-2); }
     }
     $("#alerts").innerHTML = al.map(([c, t]) => `<div class="alert" role="status"><span class="dot" style="background:${c}"></span>${esc(t)}</div>`).join("");
 
+    renderPerf();
+    fillForm();
+
     // sessions table
     const tb = $("#sessions tbody");
     tb.innerHTML = state.sessions.length ? state.sessions.map((s) => {
@@ -246,11 +306,14 @@ tbody tr.click:hover { background: var(--surface-2); }
       return `<tr class="click ${s.id === state.sel ? "sel" : ""}" data-id="${s.id}" tabindex="0">
         <td class="num">${s.id}</td><td>${st}</td><td>${esc(s.strategy)} <span class="muted">${esc(JSON.stringify(s.params))}</span></td>
         <td>${esc(s.symbol)} <span class="muted">${esc(s.interval)}</span></td>
-        <td class="num">${num(s.equity)}</td><td class="num">${pct(s.return_pct)}</td>
+        <td class="num">${num(s.initial_capital, 0)}</td><td class="num">${num(s.equity)}</td>
+        <td class="num ${signCls(s.stats?.total_pnl_usd)}">${money(s.stats?.total_pnl_usd)}</td>
+        <td class="num ${signCls(s.stats?.roi_pct)}">${pct(s.stats?.roi_pct)}</td>
+        <td class="num">${rate(s.stats?.win_rate)}</td><td class="num">${s.stats?.round_trips ?? "—"}</td>
         <td class="num">${pct(s.drawdown_pct)}</td><td class="num">${kill != null ? pct(kill) : "—"}</td>
         <td>${ts(s.last_bar_ts)} <span class="muted">${ago(s.last_recorded_at)}</span></td>
         <td>${s.unvalidated ? badge("REJECT", "unvalidated") : `run #${esc(s.validation_run_id)}`}</td></tr>`;
-    }).join("") : `<tr><td colspan="10" class="empty">No paper sessions yet. Create one with POST /paper/sessions.</td></tr>`;
+    }).join("") : `<tr><td colspan="14" class="empty">No paper sessions yet. Open “New paper session” below.</td></tr>`;
     tb.querySelectorAll("tr[data-id]").forEach((tr) => {
       const go = () => { state.sel = +tr.dataset.id; try { localStorage.setItem("btval-sel", state.sel); } catch (_) {} load(); };
       tr.addEventListener("click", go);
@@ -289,7 +352,10 @@ tbody tr.click:hover { background: var(--surface-2); }
     const pos = s.position_qty ?? 0;
     $("#tiles").innerHTML = [
       tile("Equity", num(s.equity), `start ${num(s.initial_capital)}`),
-      tile("Return", pct(s.return_pct)),
+      tile("PnL", `<span class="${signCls(s.stats?.total_pnl_usd)}">${money(s.stats?.total_pnl_usd)}</span>`,
+        `realized ${money(s.stats?.realized_pnl_usd)} · open ${money(s.stats?.unrealized_pnl_usd)}`),
+      tile("ROI", `<span class="${signCls(s.stats?.roi_pct)}">${pct(s.stats?.roi_pct)}</span>`, `fees ${money(s.stats?.fees_usd)}`),
+      tile("Win rate", rate(s.stats?.win_rate), `${s.stats?.round_trips ?? 0} round trips · PF ${s.stats?.profit_factor ?? "—"}`),
       tile("Drawdown", pct(s.drawdown_pct), kill ? `${num(ddUse, 0)}% of kill limit ${pct(kill)}` : "no kill conditions",
         kill ? { v: ddUse, c: ddColor } : null),
       tile("Max drawdown", pct(s.max_drawdown_pct), s.kill_conditions ? `backtest OOS ${pct(s.kill_conditions.backtest_max_dd_pct)}` : ""),
@@ -325,6 +391,72 @@ tbody tr.click:hover { background: var(--surface-2); }
       <td class="num">${num(o.fee_usd)}</td><td class="muted">${esc(o.note || "")}</td></tr>`).join("")
       : `<tr><td colspan="11" class="empty">No orders yet.</td></tr>`;
   }
+
+  function renderPerf() {
+    document.querySelectorAll(".seg button").forEach((b) => b.setAttribute("aria-pressed", String(+b.dataset.days === state.days)));
+    const p = state.perf, t = p?.total;
+    if (!t) {
+      $("#perf-tiles").innerHTML = `<div class="empty">No synced fills in this period. Run <code>btval sync</code>.</div>`;
+      $("#perf tbody").innerHTML = ""; $("#perf-note").textContent = ""; $("#perf-window").textContent = ""; return;
+    }
+    $("#perf-window").textContent = `${ts(t.first)} → ${ts(t.last)}`;
+    $("#perf-tiles").innerHTML = [
+      tile("Trades", num(t.trades, 0)),
+      tile("Win rate", rate(t.win_rate)),
+      tile("PnL", `<span class="${signCls(t.pnl_usd)}">${money(t.pnl_usd)}</span>`, `fees ${money(t.fees_usd)}`),
+      tile("ROI on margin", `<span class="${signCls(t.roi_on_margin_pct)}">${pct(t.roi_on_margin_pct)}</span>`, `net ${num(t.net_bps_on_notional)} bps on notional`),
+      tile("Profit factor", t.profit_factor ?? "—", `avg win ${money(t.avg_win_usd)} / loss ${money(t.avg_loss_usd)}`),
+      tile("Best / worst", `${money(t.best_usd)}`, `worst ${money(t.worst_usd)}`),
+    ].join("");
+    $("#perf tbody").innerHTML = p.rows.slice().reverse().map((r) => `<tr>
+      <td>${esc(r.strategy_name ?? r.symbol ?? "—")}</td><td class="num">${r.trades}</td><td class="num">${rate(r.win_rate)}</td>
+      <td class="num ${signCls(r.pnl_usd)}">${money(r.pnl_usd)}</td><td class="num ${signCls(r.roi_on_margin_pct)}">${pct(r.roi_on_margin_pct)}</td>
+      <td class="num">${num(r.net_bps_on_notional)}</td><td class="num">${r.profit_factor ?? "—"}</td>
+      <td class="num">${money(r.avg_win_usd)}</td><td class="num">${money(r.avg_loss_usd)}</td><td class="num">${money(r.fees_usd)}</td>
+      <td>${ts(r.last)}</td></tr>`).join("");
+    const ex = p.excluded_rows?.length || 0;
+    $("#perf-note").textContent = `ROI on margin = PnL / margin committed (notional ÷ leverage). Win rate and PnL are per position (partial closes merged).`
+      + (ex ? ` ${ex} trade-log row(s) excluded as impossible prices (bad writes in the ChromeOmega log).` : "");
+  }
+
+  let formFilled = false;
+  function fillForm() {
+    const f = $("#new-session");
+    const keep = (sel, html) => { const v = sel.value; sel.innerHTML = html; if ([...sel.options].some((o) => o.value === v)) sel.value = v; };
+    keep(f.strategy, state.strategies.map((x) => `<option value="${esc(x.name)}">${esc(x.name)}</option>`).join(""));
+    const runs = state.runs.filter((r) => r.kind === "strategy");
+    keep(f.validation_run_id, `<option value="">— none —</option>` + runs.map((r) =>
+      `<option value="${r.id}">#${r.id} ${esc(r.subject)} · ${esc(r.verdict)}</option>`).join(""));
+    keep(f.calibration_id, `<option value="">— none (enter costs via API) —</option>` + state.cals.map((c) =>
+      `<option value="${c.id}">#${c.id} · slip ${num(c.recommended_config?.slippage_bps)} / fee ${num(c.recommended_config?.fee_bps)} bps</option>`).join(""));
+    if (!formFilled && state.cals.length) { f.calibration_id.value = String(state.cals[0].id); formFilled = true; }
+  }
+
+  $("#new-session").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const f = e.target, msg = $("#new-msg");
+    const body = {
+      strategy: f.strategy.value, symbol: f.symbol.value.trim().toUpperCase(), interval: f.interval.value,
+      initial_capital: +f.initial_capital.value, max_leverage: +f.max_leverage.value,
+      max_order_notional: +f.max_order_notional.value, cost_mode: f.cost_mode.value,
+      allow_unvalidated: f.allow_unvalidated.checked,
+    };
+    if (f.validation_run_id.value) body.validation_run_id = +f.validation_run_id.value;
+    if (f.calibration_id.value) body.calibration_id = +f.calibration_id.value;
+    msg.textContent = "Creating…"; msg.className = "msg";
+    try {
+      const r = await fetch("paper/sessions", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+      const out = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(typeof out.detail === "string" ? out.detail : JSON.stringify(out.detail || out));
+      msg.textContent = `Session ${out.session_id} created.`; msg.className = "msg pos";
+      state.sel = out.session_id; try { localStorage.setItem("btval-sel", state.sel); } catch (_) {}
+      load();
+    } catch (err) { msg.textContent = err.message; msg.className = "msg neg"; }
+  });
+
+  document.querySelectorAll(".seg button").forEach((b) => b.addEventListener("click", () => {
+    state.days = +b.dataset.days; try { localStorage.setItem("btval-days", state.days); } catch (_) {} load();
+  }));
 
   // ---- charts (inline SVG, crosshair + tooltip) --------------------------
   const W = 640, H = 220, M = { l: 64, r: 14, t: 10, b: 26 };

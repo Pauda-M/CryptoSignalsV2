@@ -296,6 +296,16 @@ def post_calibrate(f: FillFilter, save: bool = True, store: Store = Depends(get_
     return res
 
 
+@app.get("/fills/performance")
+def get_performance(venue: str | None = None, strategy_id: int | None = None, symbol: str | None = None,
+                    since: str | None = None, until: str | None = None, by: Literal["strategy_name", "symbol"] = "strategy_name",
+                    store: Store = Depends(get_store)):
+    df = store.load_fills(venue, strategy_id, symbol, since, until)
+    if df.empty:
+        return {"total": None, "rows": [], "excluded_rows": []}
+    return fillmod.performance(df, by)
+
+
 @app.post("/fills/shortfall")
 def post_shortfall(f: FillFilter, store: Store = Depends(get_store)):
     return fillmod.shortfall(_fills(f, store))
@@ -327,6 +337,9 @@ class PaperReq(BaseModel):
 @app.post("/paper/sessions")
 def post_paper_session(req: PaperReq, store: Store = Depends(get_store)):
     url = os.environ.get("BTVAL_SIM_URL", "")
+    if not url:
+        raise HTTPException(503, "pbFinance is not configured on this btval (BTVAL_SIM_URL unset). "
+                                 "Paper sessions need the simulator; nothing was created.")
     cost: dict[str, Any] = {"mode": req.cost_mode}
     if req.calibration_id is not None:
         cal = store.get_calibration(req.calibration_id)
