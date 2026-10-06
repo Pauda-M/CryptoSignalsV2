@@ -157,3 +157,10 @@ def test_reused_position_id_across_symbols_not_merged(store):
     p = positions(store.load_fills())
     assert len(p) == 3
     assert p["exit_vwap"].max() < 3000 and calibrate(store.load_fills())["excluded_rows"] == []
+
+
+def test_mirror_symbol_format_and_target_guard():
+    from btval.mirror import _sym, run
+    assert _sym("BTCUSDT") == "BTC/USDT" and _sym("SOL/USDT") == "SOL/USDT"
+    with pytest.raises(RuntimeError):
+        run("postgresql://x@h/pbMasterData", "postgresql://pbservice:x@192.168.50.88:15442/pbTradeNet", once=True)

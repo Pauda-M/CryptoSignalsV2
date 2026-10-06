@@ -86,6 +86,13 @@ def main(argv: list[str] | None = None) -> int:
     pl = sub.add_parser("paper-loop", help="tick every active paper session forever (idempotent per bar)")
     pl.add_argument("--every", type=int, default=60, help="seconds between passes")
 
+    mr = sub.add_parser("bars-mirror", help="copy live 1m bars from pbMasterData into pbFinance's own DB")
+    mr.add_argument("--source-dsn", default=os.environ.get("BTVAL_BARS_DSN"))
+    mr.add_argument("--target-dsn", default=os.environ.get("PBFINANCE_DB_DSN"))
+    mr.add_argument("--every", type=int, default=10)
+    mr.add_argument("--backfill-days", type=float, default=3.0)
+    mr.add_argument("--once", action="store_true")
+
     s = sub.add_parser("serve")
     s.add_argument("--host", default="0.0.0.0")
     s.add_argument("--port", type=int, default=8790)
@@ -120,6 +127,12 @@ def main(argv: list[str] | None = None) -> int:
         v = SimVenue(os.environ["BTVAL_SIM_URL"], os.environ.get("BTVAL_SIM_API_KEY", ""),
                      os.environ.get("BTVAL_SIM_API_SECRET", ""))
         print(json.dumps(tick(Store(), v, a.session), default=str, indent=2))
+        return 0
+    if a.cmd == "bars-mirror":
+        from .mirror import run
+        if not (a.source_dsn and a.target_dsn):
+            ap.error("--source-dsn/$BTVAL_BARS_DSN and --target-dsn/$PBFINANCE_DB_DSN required")
+        run(a.source_dsn, a.target_dsn, a.every, a.backfill_days, once=a.once)
         return 0
     if a.cmd == "paper-loop":
         import time
