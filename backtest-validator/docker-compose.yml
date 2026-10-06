@@ -1,0 +1,65 @@
+# btval stack: its own Postgres, the API + dashboard, and the paper runner.
+# Nothing here points at pbTradeNet / pbMasterData. Trade-log fills arrive via
+# `btval sync` (read-only, run by an operator) or POST /ingest/trades.
+#
+#   cp .env.example .env   # fill in simulator key/secret
+#   docker compose up -d --build
+#   open http://<host>:8790/
+services:
+  btval-db:
+    image: postgres:16-alpine
+    container_name: btval-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: btval
+      POSTGRES_USER: btval
+      POSTGRES_PASSWORD: ${BTVAL_DB_PASSWORD:?set BTVAL_DB_PASSWORD in .env}
+    volumes:
+      - btval-db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U btval -d btval"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks: [btval]           # not published: only btval talks to it
+
+  btval-api:
+    build: .
+    container_name: btval-api
+    restart: unless-stopped
+    environment:
+      BTVAL_DB_URL: postgresql+psycopg://btval:${BTVAL_DB_PASSWORD}@btval-db:5432/btval
+      BTVAL_SIM_URL: ${BTVAL_SIM_URL}
+      BTVAL_SIM_HOSTS: ${BTVAL_SIM_HOSTS:-binance-simulator,pbfinance}
+      BTVAL_SIM_API_KEY: ${BTVAL_SIM_API_KEY:-}
+      BTVAL_SIM_API_SECRET: ${BTVAL_SIM_API_SECRET:-}
+    ports:
+      - "${BTVAL_BIND_IP:-127.0.0.1}:8790:8790"
+    depends_on:
+      btval-db: { condition: service_healthy }
+    networks: [btval, sim]
+
+  btval-runner:
+    build: .
+    container_name: btval-runner
+    restart: unless-stopped
+    command: ["python", "-m", "btval", "paper-loop", "--every", "60"]
+    environment:
+      BTVAL_DB_URL: postgresql+psycopg://btval:${BTVAL_DB_PASSWORD}@btval-db:5432/btval
+      BTVAL_SIM_URL: ${BTVAL_SIM_URL:?set BTVAL_SIM_URL (pbFinance) in .env}
+      BTVAL_SIM_HOSTS: ${BTVAL_SIM_HOSTS:-binance-simulator,pbfinance}
+      BTVAL_SIM_API_KEY: ${BTVAL_SIM_API_KEY:?simulator key}
+      BTVAL_SIM_API_SECRET: ${BTVAL_SIM_API_SECRET:?simulator secret}
+    depends_on:
+      btval-db: { condition: service_healthy }
+    networks: [btval, sim]
+
+networks:
+  btval:
+    name: btval
+  sim:
+    external: true
+    name: ${SIM_NETWORK:-pb-tradenet-v2}
+
+volumes:
+  btval-db-data:

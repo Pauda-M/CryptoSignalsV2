@@ -29,7 +29,9 @@ def health_check(live_net: pd.Series, kill: dict, window: int | None = None) -> 
     window = max(window or kill["min_window"], kill["min_window"])
     recent = r.tail(window)
     equity = (1 + r).cumprod()
-    dd = float(equity.iloc[-1] / equity.cummax().iloc[-1] - 1) if len(r) else 0.0
+    # Peak includes the starting capital (1.0): a loss on the very first live
+    # bar is drawdown too, which a cummax over returns alone never sees.
+    dd = float(equity.iloc[-1] / max(1.0, equity.max()) - 1) if len(r) else 0.0
 
     alerts, notes = [], []
     if dd * 100 < kill["max_dd_pct_limit"]:

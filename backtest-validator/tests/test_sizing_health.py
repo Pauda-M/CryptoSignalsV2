@@ -54,3 +54,8 @@ def test_drawdown_halt():
     r = pd.Series([0.0] * 10 + [-0.05] * 8)
     out = health_check(r, _kill())
     assert "DRAWDOWN_EXCEEDED" in out["alerts"] and out["action"] == "HALT"
+
+
+def test_first_bar_loss_is_drawdown():
+    out = health_check(pd.Series([-0.30]), _kill())
+    assert out["current_dd_pct"] == pytest.approx(-30.0) and "DRAWDOWN_EXCEEDED" in out["alerts"]

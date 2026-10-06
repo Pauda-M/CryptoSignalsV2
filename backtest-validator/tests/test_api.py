@@ -62,3 +62,60 @@ def test_signal_moves_with_restamped_duplicated_bars():
     r = c.post("/validate/signal", json={"bars": bars, "bar_label": "open", "signal": [1.0] * 301,
                                          "n_trials": 1})
     assert r.status_code == 200, r.text
+
+
+def test_ingest_calibrate_paper_and_dashboard(monkeypatch):
+    import numpy as np
+
+    from btval import api
+    from btval.venue import SimVenue
+
+    from .fake_pbfinance import FakePbFinance
+
+    rows = [dict(id=i, position_id=i, symbol="BTCUSDT", direction="long", signal_price=100.0,
+                 entry_price=100.0 + 0.01 * i, exit_price=101.0, notional_usd=1000.0, pnl_usd=9.0,
+                 fee_usd=0.8, api_key_ref="SECRET", signal_bucket_ts="2026-10-05T08:00:00Z",
+                 opened_at="2026-10-05T08:01:00Z", closed_at="2026-10-05T10:00:00Z") for i in range(1, 6)]
+    r = c.post("/ingest/trades", json={"venue": "binance", "source_db": "t-prod", "rows": rows})
+    assert r.json()["inserted"] == 5
+    cal = c.post("/fills/calibrate", json={"venue": "binance"}).json()
+    assert cal["calibration_id"] and cal["recommended_config"]["fee_bps"] == 4.0
+
+    run = c.post("/validate/strategy", json={"bars": _bars(), "bar_label": "close", "strategy": "sma_cross",
+                                              "prior_trials": 1, "train_bars": 300, "test_bars": 90,
+                                              "calibration_id": cal["calibration_id"]}).json()
+    assert run["run_id"] and run["config"]["fee_bps"] == 4.0
+
+    monkeypatch.setenv("BTVAL_SIM_URL", "http://binance-simulator:8976")
+    r = c.post("/paper/sessions", json={"strategy": "sma_cross", "symbol": "BTCUSDT",
+                                        "validation_run_id": run["run_id"], "calibration_id": cal["calibration_id"]})
+    if run["verdict"] != "DEPLOYABLE":
+        assert r.status_code == 422
+        r = c.post("/paper/sessions", json={"strategy": "sma_cross", "symbol": "BTCUSDT", "params": {"fast": 10, "slow": 50},
+                                            "allow_unvalidated": True, "calibration_id": cal["calibration_id"]})
+    assert r.status_code == 200, r.text
+    sid = r.json()["session_id"]
+
+    fake = FakePbFinance(list(100 * np.exp(np.linspace(0, .4, 260))))
+    api.app.dependency_overrides[api.get_venue] = lambda: SimVenue(
+        "http://binance-simulator:8976", "k", "s", client=fake.client(), clock=fake.clock)
+    try:
+        t = c.post(f"/paper/sessions/{sid}/tick").json()
+        assert t["order"]["status"] == "filled"
+    finally:
+        api.app.dependency_overrides.clear()
+    sessions = c.get("/paper/sessions").json()
+    s = next(x for x in sessions if x["id"] == sid)
+    assert s["unvalidated"] is (run["verdict"] != "DEPLOYABLE") and s["equity"] is not None
+    assert len(c.get(f"/paper/sessions/{sid}/equity").json()) == 1
+    assert c.get(f"/paper/sessions/{sid}/orders").json()[0]["status"] == "filled"
+    assert c.get("/calibrations").json()
+    html = c.get("/")
+    assert html.status_code == 200 and "paper monitor" in html.text
+
+
+def test_paper_refuses_live_venue(monkeypatch):
+    monkeypatch.setenv("BTVAL_SIM_URL", "https://fapi.binance.com")
+    r = c.post("/paper/sessions", json={"strategy": "sma_cross", "symbol": "BTCUSDT", "allow_unvalidated": True,
+                                        "fee_bps": 4, "slippage_bps": 2})
+    assert r.status_code == 403

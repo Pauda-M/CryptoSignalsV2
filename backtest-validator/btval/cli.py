@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 
 from .config import Config, Gates
@@ -60,6 +61,24 @@ def main(argv: list[str] | None = None) -> int:
     d = sub.add_parser("demo", help="run on a synthetic no-edge random walk")
     d.add_argument("--json", action="store_true")
 
+    sy = sub.add_parser("sync", help="copy ChromeOmega trade-log rows into btval's own store (read-only on source)")
+    sy.add_argument("--source-dsn", default=os.environ.get("BTVAL_SOURCE_DSN"),
+                    help="postgresql://... of pbTradeNet; default $BTVAL_SOURCE_DSN. Never stored.")
+    sy.add_argument("--table", choices=["live", "sim"], required=True)
+    sy.add_argument("--venue", required=True, help="what venue these fills came from: binance | pbfinance")
+    sy.add_argument("--source-db", required=True, help="label, e.g. tradenet-prod")
+
+    ca = sub.add_parser("calibrate", help="measured fee/slippage from stored fills")
+    ca.add_argument("--venue")
+    ca.add_argument("--strategy-id", type=int)
+    ca.add_argument("--since")
+
+    pt = sub.add_parser("paper-tick", help="one bar of paper trading on pbFinance")
+    pt.add_argument("--session", type=int, required=True)
+
+    pl = sub.add_parser("paper-loop", help="tick every active paper session forever (idempotent per bar)")
+    pl.add_argument("--every", type=int, default=60, help="seconds between passes")
+
     s = sub.add_parser("serve")
     s.add_argument("--host", default="0.0.0.0")
     s.add_argument("--port", type=int, default=8790)
@@ -69,6 +88,55 @@ def main(argv: list[str] | None = None) -> int:
         import uvicorn
         uvicorn.run("btval.api:app", host=a.host, port=a.port)
         return 0
+    if a.cmd == "sync":
+        from .store import Store
+        from .sync import sync
+        if not a.source_dsn:
+            ap.error("--source-dsn or BTVAL_SOURCE_DSN required")
+        print(json.dumps(sync(Store(), a.source_dsn, a.table, a.venue, a.source_db), default=str, indent=2))
+        return 0
+    if a.cmd == "calibrate":
+        from .fills import calibrate
+        from .store import Store
+        st = Store()
+        res = calibrate(st.load_fills(a.venue, a.strategy_id, since=a.since))
+        if "error" not in res:
+            res["calibration_id"] = st.save_calibration(
+                {"venue": a.venue, "strategy_id": a.strategy_id, "since": a.since}, res)
+        res.pop("empirical_slippage_bps", None)
+        print(json.dumps(res, default=str, indent=2))
+        return 0
+    if a.cmd == "paper-tick":
+        from .paper import tick
+        from .store import Store
+        from .venue import SimVenue
+        v = SimVenue(os.environ["BTVAL_SIM_URL"], os.environ.get("BTVAL_SIM_API_KEY", ""),
+                     os.environ.get("BTVAL_SIM_API_SECRET", ""))
+        print(json.dumps(tick(Store(), v, a.session), default=str, indent=2))
+        return 0
+    if a.cmd == "paper-loop":
+        import time
+
+        from .paper import list_sessions, tick
+        from .store import Store
+        from .venue import SimVenue
+        st = Store()
+        v = SimVenue(os.environ["BTVAL_SIM_URL"], os.environ.get("BTVAL_SIM_API_KEY", ""),
+                     os.environ.get("BTVAL_SIM_API_SECRET", ""))
+        while True:
+            for sess in list_sessions(st):
+                if sess["status"] != "active":
+                    continue
+                try:
+                    out = tick(st, v, sess["id"])
+                    o = out.get("order", {})
+                    if o.get("status") != "already_decided":
+                        print(json.dumps({"session": sess["id"], "bar": out.get("bar_ts"), "order": o.get("status"),
+                                          "equity": out.get("equity"),
+                                          "action": (out.get("health") or {}).get("action")}, default=str), flush=True)
+                except Exception as e:  # noqa: BLE001 -- one session failing must not stop the others
+                    print(json.dumps({"session": sess["id"], "error": f"{type(e).__name__}: {e}"}), flush=True)
+            time.sleep(a.every)
     if a.cmd == "demo":
         rep = validate_strategy(synthetic_prices(regime_drift=False), "tsmom", prior_trials=0)
         _print(rep, a.json)
