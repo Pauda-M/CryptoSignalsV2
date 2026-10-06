@@ -17,6 +17,7 @@ class FakePbFinance:
         self.orders = []
         self.seen_client_ids = set()
         self.reject_next = False
+        self.live_price = None
         real = int(time.time() * 1000)
         self.anchor = real - real % interval_ms - (len(self.closes) - 1) * interval_ms  # open of bar 0
         self.now_ms = real
@@ -43,6 +44,8 @@ class FakePbFinance:
             q = dict(urllib.parse.parse_qsl(req.content.decode()))
         if path == "/fapi/v1/klines":
             return httpx.Response(200, json=self._klines(int(q.get("limit", 500))))
+        if path == "/fapi/v1/ticker/price":
+            return httpx.Response(200, json={"symbol": q.get("symbol"), "price": str(self.live_price or self.closes[-1])})
         if path == "/fapi/v1/exchangeInfo":
             return httpx.Response(200, json={"symbols": [{"symbol": self.symbol, "filters": [
                 {"filterType": "LOT_SIZE", "stepSize": "0.001", "minQty": "0.001"},

@@ -30,7 +30,7 @@ from sqlalchemy import insert, select, update
 from sqlalchemy.exc import IntegrityError
 
 from .health import health_check
-from .store import Store, paper_equity, paper_orders, paper_sessions
+from .store import Store, paper_equity, paper_marks, paper_orders, paper_sessions
 from .strategies import get_strategy
 from .venue import SimVenue, assert_sim_url
 
@@ -299,7 +299,30 @@ def tick(store: Store, venue: SimVenue, session_id: int) -> dict:
             cx.execute(update(paper_sessions).where(paper_sessions.c.id == session_id)
                        .values(status="halted", halted_reason=",".join(h["alerts"])))
     _snapshot(store, sess, bar_ts, price, sig, h, out.get("reconcile", {}).get("diverged"))
+    out["live"] = _mark(store, sess, venue, price)
     return out
+
+
+def _mark(store: Store, sess: dict, venue: SimVenue, fallback_price: float) -> dict:
+    """Live mark-to-market at the venue's current price (display only; kill
+    conditions stay on bar closes, like the backtest)."""
+    try:
+        px = venue.ticker_price(sess["symbol"])
+    except Exception:  # noqa: BLE001 -- a missing tick must not break trading
+        px = fallback_price
+    q, cash = _position_and_cash(sess, ledger(store, sess["id"]))
+    eq = cash + q * px
+    with store.engine.begin() as cx:
+        prev = cx.execute(select(paper_marks.c.peak_equity).where(paper_marks.c.session_id == sess["id"])).scalar()
+        bar_peak = cx.execute(select(paper_equity.c.equity).where(paper_equity.c.session_id == sess["id"])
+                              .order_by(paper_equity.c.equity.desc()).limit(1)).scalar()
+        peak = max(float(prev or 0), float(bar_peak or 0), float(sess["initial_capital"]), eq)
+        vals = dict(marked_at=_now(), price=px, position_qty=q, equity=eq, peak_equity=peak)
+        if prev is None:
+            cx.execute(insert(paper_marks).values(session_id=sess["id"], **vals))
+        else:
+            cx.execute(update(paper_marks).where(paper_marks.c.session_id == sess["id"]).values(**vals))
+    return {"price": px, "equity": round(eq, 2), "position_qty": q}
 
 
 def _snapshot(store: Store, sess: dict, bar_ts, price: float, sig: float, h: dict | None,
@@ -379,8 +402,17 @@ def list_sessions(store: Store) -> list[dict]:
             last = dict(last._mapping) if last else {}
             mdd = cx.execute(select(paper_equity.c.drawdown_pct).where(paper_equity.c.session_id == s["id"])
                              .order_by(paper_equity.c.drawdown_pct).limit(1)).scalar()
+            mark = cx.execute(select(paper_marks).where(paper_marks.c.session_id == s["id"])).first()
+            mark = dict(mark._mapping) if mark else None
+            if mark and (not last or mark["marked_at"] >= last.get("recorded_at", mark["marked_at"])):
+                live_dd = (mark["equity"] / mark["peak_equity"] - 1) * 100 if mark["peak_equity"] else 0.0
+                last = {**last, "equity": mark["equity"], "price": mark["price"],
+                        "position_qty": mark["position_qty"], "drawdown_pct": live_dd,
+                        "recorded_at": mark["marked_at"]}
+                mdd = min(mdd if mdd is not None else 0.0, live_dd)
             out.append({
                 "id": s["id"], "status": s["status"], "strategy": s["strategy"], "params": s["params"],
+                "live": bool(mark), "marked_at": mark["marked_at"] if mark else None,
                 "symbol": s["symbol"], "interval": s["interval"], "venue_host": s["venue_host"],
                 "created_at": s["created_at"], "unvalidated": s["unvalidated"],
                 "validation_run_id": s["validation_run_id"], "halted_reason": s["halted_reason"],

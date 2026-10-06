@@ -104,6 +104,11 @@ class SimVenue:
         idx = pd.to_datetime([int(k[6]) + 1 for k in closed], unit="ms", utc=True).floor("s")
         return pd.Series([float(k[4]) for k in closed], index=idx, name="close")
 
+    def ticker_price(self, symbol: str) -> float:
+        r = self.http.get("/fapi/v1/ticker/price", params={"symbol": symbol})
+        r.raise_for_status()
+        return float(r.json()["price"])
+
     def filters(self, symbol: str) -> SymbolFilters:
         if symbol not in self._filters:
             r = self.http.get("/fapi/v1/exchangeInfo")

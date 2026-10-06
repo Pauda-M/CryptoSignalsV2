@@ -123,6 +123,17 @@ paper_equity = Table(
     UniqueConstraint("session_id", "bar_ts", name="uq_equity_bar"),
 )
 
+# Live mark-to-market, one row per session, refreshed every runner tick.
+paper_marks = Table(
+    "paper_marks", md,
+    Column("session_id", Integer, primary_key=True),
+    Column("marked_at", DateTime(timezone=True), nullable=False),
+    Column("price", Float, nullable=False),
+    Column("position_qty", Float, nullable=False),
+    Column("equity", Float, nullable=False),
+    Column("peak_equity", Float, nullable=False),
+)
+
 FILL_COLUMNS = [c.name for c in fills.columns if c.name not in ("id", "ingested_at")]
 
 

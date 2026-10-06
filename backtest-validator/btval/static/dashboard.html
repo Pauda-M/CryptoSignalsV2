@@ -130,7 +130,7 @@ details > summary { cursor: pointer; color: var(--text-secondary); font-size: 13
   <section class="panel">
     <h2>Paper sessions</h2>
     <div class="table-wrap"><table id="sessions">
-      <thead><tr><th>ID</th><th>Status</th><th>Strategy</th><th>Symbol</th><th class="num">Start $</th><th class="num">Equity</th>
+      <thead><tr><th>ID</th><th>Status</th><th>Strategy</th><th>Symbol</th><th class="num">Start $</th><th class="num">Equity (live)</th>
         <th class="num">PnL $</th><th class="num">ROI</th><th class="num">Win rate</th><th class="num">Trips</th>
         <th class="num">Drawdown</th><th class="num">Kill at</th><th>Last bar</th><th>Validation</th></tr></thead>
       <tbody></tbody></table></div>
@@ -351,7 +351,7 @@ details > summary { cursor: pointer; color: var(--text-secondary); font-size: 13
     const ddColor = ddUse >= 100 ? "var(--critical)" : ddUse >= 66 ? "var(--serious)" : ddUse >= 33 ? "var(--warning)" : "var(--good)";
     const pos = s.position_qty ?? 0;
     $("#tiles").innerHTML = [
-      tile("Equity", num(s.equity), `start ${num(s.initial_capital)}`),
+      tile(s.live ? "Equity · live" : "Equity", num(s.equity), `start ${num(s.initial_capital)}${s.live ? ` · marked ${ago(s.marked_at)} @ ${num(s.price)}` : ""}`),
       tile("PnL", `<span class="${signCls(s.stats?.total_pnl_usd)}">${money(s.stats?.total_pnl_usd)}</span>`,
         `realized ${money(s.stats?.realized_pnl_usd)} · open ${money(s.stats?.unrealized_pnl_usd)}`),
       tile("ROI", `<span class="${signCls(s.stats?.roi_pct)}">${pct(s.stats?.roi_pct)}</span>`, `fees ${money(s.stats?.fees_usd)}`),
@@ -378,6 +378,7 @@ details > summary { cursor: pointer; color: var(--text-secondary); font-size: 13
     ].join("");
 
     const eq = state.equity.map((e) => ({ t: new Date(e.bar_ts), v: e.equity }));
+    if (s.live && s.marked_at && eq.length && new Date(s.marked_at) > eq[eq.length - 1].t) eq.push({ t: new Date(s.marked_at), v: s.equity });
     lineChart($("#equity-chart"), eq, { fmt: (v) => num(v), label: "Equity", base: s.initial_capital });
     const dd = state.equity.map((e) => ({ t: new Date(e.bar_ts), v: e.drawdown_pct }));
     lineChart($("#dd-chart"), dd, { fmt: (v) => pct(v), label: "Drawdown", ref: kill, refLabel: "Kill limit", maxZero: true });

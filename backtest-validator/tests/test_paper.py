@@ -111,7 +111,9 @@ def test_equity_snapshots_and_listing(store):
     eq = equity_series(store, sid)
     assert len(eq) == 2 and eq[0]["drawdown_pct"] <= 0
     s = next(x for x in list_sessions(store) if x["id"] == sid)
-    assert s["status"] == "active" and s["equity"] == pytest.approx(eq[-1]["equity"])
+    assert s["status"] == "active" and s["live"]
+    # session equity is the LIVE mark (venue ticker), the bar snapshot is at the close
+    assert s["price"] == pytest.approx(fake.closes[-1]) and eq[-1]["price"] == pytest.approx(fake.closes[-2])
 
 
 def test_run_must_match_strategy(store):
@@ -210,3 +212,20 @@ def test_snapshot_reflects_retried_fill_and_refreshes(store):
     assert eq[0]["recorded_at"] >= first["recorded_at"]
     s = next(x for x in list_sessions(store) if x["id"] == sid)
     assert s["position_qty"] > 0
+
+
+def test_live_mark_moves_equity_within_a_bar(store):
+    from btval.paper import list_sessions
+    fake = FakePbFinance(_uptrend())
+    sid = _session(store, max_order_notional=1e9)
+    tick(store, _venue(fake), sid)
+    s0 = next(x for x in list_sessions(store) if x["id"] == sid)
+    fake.live_price = fake.closes[-2] * 1.05          # price moves, bar not closed
+    out = tick(store, _venue(fake), sid)
+    assert out["order"]["status"] == "already_decided"
+    s1 = next(x for x in list_sessions(store) if x["id"] == sid)
+    assert s1["live"] and s1["equity"] > s0["equity"] and s1["price"] == pytest.approx(fake.live_price)
+    fake.live_price = fake.closes[-2] * 0.90
+    tick(store, _venue(fake), sid)
+    s2 = next(x for x in list_sessions(store) if x["id"] == sid)
+    assert s2["drawdown_pct"] < 0 and s2["status"] == "active"   # display only: no halt off a live tick
