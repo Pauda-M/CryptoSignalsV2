@@ -126,6 +126,18 @@ both preprod and prod.
 | `POST /fills/shortfall` | The ideal signal→exit edge versus what the account kept: entry slippage, fees, funding, and the residual. |
 | `POST /fills/venue-gap?a=pbfinance&b=binance` | The same signals on two venues: whether pbFinance agrees with Binance on *whether* a fill happened and *at what price*. |
 
+Rows with impossible prices (an exit or signal price more than 3× away from the entry) are
+treated as bad writes in the source log. Their whole position is excluded and listed under
+`excluded_rows`, so they can be fixed at the source. Live example: an S26 SOL short with
+entry 95.60 and exit 1542.24.
+
+Bars straight from pbMasterData (read-only; the still-forming bar is dropped):
+```bash
+BTVAL_BARS_DSN=postgresql://pbservice:...@192.168.50.88:25432/pbMasterData \
+  python -m btval validate --pg-table master_data.cagg_ohlcv_1440m --pair-id 5 --bar-label open \
+  --strategy tsmom --prior-trials 0 --calibration-id 1 --save
+```
+
 Calibration caveats (also returned by the endpoint):
 - Only **filled** orders are in a trade log. Limit entries that never filled are invisible, so the measured entry slippage understates the cost.
 - Exit slippage can't be measured, because the log has no exit decision price.

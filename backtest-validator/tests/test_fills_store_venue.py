@@ -92,3 +92,44 @@ def test_venue_accepts_allowlisted_internal():
     with pytest.raises(NotASimulator):
         assert_sim_url("http://10.0.0.5:8976")            # internal but not allowlisted
     assert assert_sim_url("http://10.0.0.5:8976", allow="10.0.0.5")
+
+
+def test_impossible_exit_is_excluded_and_reported(store):
+    rows = _rows()
+    rows.append(dict(rows[2], id=4, position_id=9, exit_price=1542.24, entry_price=95.6, signal_price=95.58,
+                     symbol="SOLUSDT", direction="short"))
+    store.upsert_fills(rows, "binance", "prod")
+    c = calibrate(store.load_fills())
+    assert c["n_positions"] == 2
+    assert [r["source_row_id"] for r in c["excluded_rows"]] == [4]
+    assert "exit_price" in c["excluded_rows"][0]["reason"]
+    s = shortfall(store.load_fills())
+    assert s["n_positions"] == 2 and len(s["excluded_rows"]) == 1
+
+
+def test_pg_bar_loader_drops_forming_bar(monkeypatch):
+    import types
+
+    import pandas as pd
+
+    from btval import data
+
+    rows = [(pd.Timestamp("2026-10-04", tz="UTC"), 100.0), (pd.Timestamp("2026-10-05", tz="UTC"), 101.0),
+            (pd.Timestamp("2026-10-06", tz="UTC"), 102.0)]
+
+    class Cx:
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+        def execute(self, q, args=None):
+            self.q = q
+            return types.SimpleNamespace(fetchall=lambda: rows)
+        def rollback(self): pass
+
+    monkeypatch.setitem(__import__("sys").modules, "psycopg", types.SimpleNamespace(connect=lambda dsn: Cx()))
+    s, notes = data.load_pg_bars("x", "master_data.cagg_ohlcv_1440m", 5, "open",
+                                 now=pd.Timestamp("2026-10-06 06:00", tz="UTC"))
+    assert list(s.values) == [100.0, 101.0]                # 10-06 bar closes 10-07: still forming
+    assert s.index[-1] == pd.Timestamp("2026-10-06", tz="UTC")  # 10-05 bar stamped at its close
+    assert any("still-forming" in n for n in notes)
+    with pytest.raises(ValueError):
+        data.load_pg_bars("x", "bad; drop table", 5, "open")

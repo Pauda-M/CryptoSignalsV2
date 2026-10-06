@@ -72,3 +72,36 @@ def synthetic_prices(n: int = 1825, seed: int = 7, phi: float = 0.0, freq: str =
         r[t] = prev
     idx = pd.date_range(start, periods=n, freq=freq, tz="UTC")
     return pd.Series(20_000 * np.exp(np.cumsum(r)), index=idx, name="close")
+
+
+_IDENT = __import__("re").compile(r"^[A-Za-z_][A-Za-z0-9_]*\.[A-Za-z_][A-Za-z0-9_]*$")
+
+
+def load_pg_bars(dsn: str, table: str, pair_id: int, bar_label: str, since: str | None = None,
+                 now: pd.Timestamp | None = None) -> tuple[pd.Series, list[str]]:
+    """Closes from a Postgres OHLCV table (e.g. pbMasterData master_data.cagg_ohlcv_1440m).
+
+    READ ONLY transaction. Returns close prices stamped at bar CLOSE time with
+    the still-forming bar dropped: real-time continuous aggregates return
+    today's partial bar as if it were final.
+    """
+    import psycopg
+
+    if not _IDENT.match(table):
+        raise ValueError("table must be schema.table")
+    q = f"SELECT timestamp, close FROM {table} WHERE pair_id = %s" + (" AND timestamp >= %s" if since else "") \
+        + " ORDER BY timestamp"
+    with psycopg.connect(dsn) as cx:
+        cx.execute("SET TRANSACTION READ ONLY")
+        rows = cx.execute(q, (pair_id, since) if since else (pair_id,)).fetchall()
+        cx.rollback()
+    if not rows:
+        raise ValueError(f"no bars for pair_id {pair_id} in {table}")
+    s = pd.Series([float(r[1]) for r in rows], index=pd.DatetimeIndex([r[0] for r in rows]).tz_convert("UTC"))
+    s, notes = normalize_bars(s, bar_label)
+    now = now or pd.Timestamp.now(tz="UTC")
+    forming = s.index > now
+    if forming.any():
+        notes.append(f"dropped {int(forming.sum())} still-forming bar(s) closing after {now:%Y-%m-%d %H:%M}Z")
+        s = s[~forming]
+    return s, notes

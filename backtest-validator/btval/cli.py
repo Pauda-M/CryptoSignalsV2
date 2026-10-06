@@ -47,7 +47,14 @@ def main(argv: list[str] | None = None) -> int:
     sub = ap.add_subparsers(dest="cmd", required=True)
 
     v = sub.add_parser("validate", help="validate a registry strategy on a CSV")
-    v.add_argument("--csv", required=True)
+    src = v.add_mutually_exclusive_group(required=True)
+    src.add_argument("--csv")
+    src.add_argument("--pg-table", help="schema.table of OHLCV bars, e.g. master_data.cagg_ohlcv_1440m")
+    v.add_argument("--pg-dsn", default=os.environ.get("BTVAL_BARS_DSN"), help="default $BTVAL_BARS_DSN; read-only use")
+    v.add_argument("--pair-id", type=int)
+    v.add_argument("--since")
+    v.add_argument("--calibration-id", type=int, help="use measured fee/slippage from a stored calibration")
+    v.add_argument("--save", action="store_true", help="store the run in btval's DB (shows on the dashboard)")
     v.add_argument("--bar-label", required=True, choices=["open", "close"])
     v.add_argument("--strategy", required=True)
     v.add_argument("--prior-trials", type=int, required=True,
@@ -141,12 +148,37 @@ def main(argv: list[str] | None = None) -> int:
         rep = validate_strategy(synthetic_prices(regime_drift=False), "tsmom", prior_trials=0)
         _print(rep, a.json)
         return 0
-    prices, notes = normalize_bars(load_csv(a.csv), a.bar_label)
+    if a.csv:
+        prices, notes = normalize_bars(load_csv(a.csv), a.bar_label)
+    else:
+        if not (a.pg_dsn and a.pair_id is not None):
+            ap.error("--pg-table needs --pg-dsn (or $BTVAL_BARS_DSN) and --pair-id")
+        from .data import load_pg_bars
+        prices, notes = load_pg_bars(a.pg_dsn, a.pg_table, a.pair_id, a.bar_label, a.since)
     for n in notes:
         print("note:", n, file=sys.stderr)
     cfg = Config(fee_bps=a.fee_bps, slippage_bps=a.slippage_bps)
+    store = None
+    if a.calibration_id is not None or a.save:
+        from .store import Store
+        store = Store()
+    if a.calibration_id is not None:
+        cal = store.get_calibration(a.calibration_id)
+        if cal is None:
+            ap.error(f"calibration {a.calibration_id} not found")
+        rec = cal["result"]["recommended_config"]
+        cfg.fee_bps, cfg.slippage_bps = float(rec["fee_bps"]), float(rec["slippage_bps"])
     rep = validate_strategy(prices, a.strategy, cfg, Gates(), prior_trials=a.prior_trials,
                             train_bars=a.train_bars, test_bars=a.test_bars, bar_label="close")
+    rep["data_notes"] = notes
+    rep["data"] = {"source": a.csv or f"{a.pg_table}#pair_id={a.pair_id}", "bars": len(prices),
+                   "first": str(prices.index[0]), "last": str(prices.index[-1])}
+    if a.calibration_id is not None:
+        rep["calibration"] = {"calibration_id": a.calibration_id, "fee_bps": cfg.fee_bps,
+                              "slippage_bps": cfg.slippage_bps}
+    if a.save:
+        rep["run_id"] = store.save_run("strategy", a.strategy, rep, a.prior_trials)
+        print(f"saved run #{rep['run_id']}", file=sys.stderr)
     _print(rep, a.json)
     return 0 if rep["verdict"] == "DEPLOYABLE" else 2
 

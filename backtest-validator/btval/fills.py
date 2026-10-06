@@ -14,6 +14,41 @@ def _sign(direction: pd.Series) -> pd.Series:
     return np.where(direction.str.lower().str.startswith("l"), 1.0, -1.0)
 
 
+# A price more than this factor away from the position's own entry is not a
+# fill, it is a bad write (seen live: SOL short entry 95.60, exit 1542.24).
+SUSPECT_FACTOR = 3.0
+
+
+def suspect_rows(df: pd.DataFrame, factor: float = SUSPECT_FACTOR) -> pd.DataFrame:
+    """Rows whose exit or signal price is impossible relative to their entry."""
+    if df.empty:
+        return df
+    e = df["entry_price"].astype(float)
+    bad = pd.Series(False, index=df.index)
+    reasons = pd.Series("", index=df.index)
+    for col in ("exit_price", "signal_price"):
+        if col in df:
+            r = df[col].astype(float) / e
+            m = r.notna() & ((r > factor) | (r < 1 / factor) | (df[col] <= 0))
+            bad |= m
+            reasons = reasons.where(~m, reasons + f"{col} {factor:g}x off entry; ")
+    out = df.loc[bad, ["source_row_id", "venue", "source_db", "position_id", "strategy_name", "symbol",
+                       "entry_price", "exit_price", "signal_price", "closed_at"]].copy()
+    out["reason"] = reasons[bad].str.strip("; ")
+    return out
+
+
+def clean(df: pd.DataFrame) -> tuple[pd.DataFrame, list[dict]]:
+    """Drop whole positions that contain a suspect row; return what was dropped."""
+    bad = suspect_rows(df)
+    if bad.empty:
+        return df, []
+    keys = set(zip(bad["venue"], bad["source_db"], bad["position_id"]))
+    keep = ~pd.Series([k in keys for k in zip(df["venue"], df["source_db"], df["position_id"])], index=df.index)
+    rows = bad.assign(closed_at=bad["closed_at"].astype(str)).to_dict("records")
+    return df[keep], rows
+
+
 def positions(df: pd.DataFrame) -> pd.DataFrame:
     """Collapse partial-close rows into one row per position."""
     if df.empty:
@@ -59,6 +94,7 @@ def _dist(x: pd.Series, w: pd.Series | None = None) -> dict:
 
 def calibrate(df: pd.DataFrame) -> dict:
     """Measured cost model from fills -> numbers that replace guessed Config values."""
+    df, excluded = clean(df)
     p = positions(df)
     p = p[p["signal_price"].notna() & (p["signal_price"] > 0) & (p["notional_usd"] > 0)]
     if p.empty:
@@ -87,12 +123,15 @@ def calibrate(df: pd.DataFrame) -> dict:
         "signal_to_fill_minutes": _dist(p["signal_to_fill_min"]),
         "recommended_config": {"slippage_bps": round(slip_bps, 3), "fee_bps": round(fee_side, 3)},
         "empirical_slippage_bps": [round(float(v), 4) for v in p["entry_slip_bps"].dropna().tolist()],
-        "warnings": warnings,
+        "warnings": warnings + ([f"{len(excluded)} trade-log rows excluded as impossible prices; "
+                                 "see excluded_rows -- they are bugs in the source log."] if excluded else []),
+        "excluded_rows": excluded,
     }
 
 
 def shortfall(df: pd.DataFrame) -> dict:
     """Where the edge went: ideal (signal->exit) vs what the account kept."""
+    df, excluded = clean(df)
     p = positions(df)
     p = p[p["signal_price"].notna() & (p["notional_usd"] > 0)]
     if p.empty:
@@ -110,11 +149,13 @@ def shortfall(df: pd.DataFrame) -> dict:
         "shortfall_bps": {k: round(v, 3) for k, v in parts.items()},
         "edge_consumed_pct": round((ideal - net) / ideal * 100, 1) if ideal > 0 else None,
         "note": "residual = exit slippage + leverage/size rounding + anything the log does not itemise.",
+        "excluded_rows": excluded,
     }
 
 
 def venue_gap(df: pd.DataFrame, a: str, b: str) -> dict:
     """Same signals on two venues (e.g. pbfinance vs binance): does the fake mirror the real?"""
+    df, excluded = clean(df)
     p = positions(df)
     key = ["symbol", "direction", "signal_bucket_ts"]
     pa, pb = p[p["venue"] == a], p[p["venue"] == b]
@@ -125,6 +166,7 @@ def venue_gap(df: pd.DataFrame, a: str, b: str) -> dict:
         for col in ("entry_slip_bps", "net_bps", "fee_bps_round_trip"):
             d = m[f"{col}_{a}"] - m[f"{col}_{b}"]
             out[f"{col}_diff_{a}_minus_{b}"] = _dist(d)
+    out["excluded_rows"] = excluded
     out["read"] = ("Unmatched positions mean the venues disagree on WHETHER a trade happened (fill model); "
                    "matched diffs show how much they disagree on price.")
     return out
