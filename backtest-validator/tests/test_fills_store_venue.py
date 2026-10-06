@@ -146,3 +146,14 @@ def test_performance_scoreboard(store):
     assert t["pnl_usd"] == pytest.approx(8.5)
     assert t["roi_on_margin_pct"] == pytest.approx(8.5 / 400 * 100, abs=0.01)
     assert t["profit_factor"] == pytest.approx(14 / 5.5, rel=1e-3)
+
+
+@pytest.mark.parametrize("dsn", ["postgresql://pbservice:x@192.168.50.88:15442/pbTradeNet",
+                                 "postgresql://pbservice:x@192.168.50.88:15432/anything",
+                                 "postgresql://u:p@elsewhere:5432/pbTradeNet",
+                                 "host=192.168.50.88 port=15442 dbname=whatever user=pbservice",
+                                 "postgresql://pbservice:x@192.168.50.88:25432/pbMasterData"])
+def test_never_reads_tradenet(dsn):
+    from btval.data import load_pg_bars
+    with pytest.raises(RuntimeError, match="does not read production"):
+        load_pg_bars(dsn, "master_data.cagg_ohlcv_1440m", 5, "open")

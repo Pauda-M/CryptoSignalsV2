@@ -11,7 +11,7 @@ simulator.
 ```
 validate ──► DEPLOYABLE run (+ kill conditions)
                  │
-real fills ──► sync (read-only) ──► calibrate ──► slippage / fee bps
+own/ingested fills ──► calibrate ──► slippage / fee bps
                  │                                     │
                  └───────────► paper session ◄─────────┘
                                    │  per closed bar: signal → MARKET order on pbFinance
@@ -108,39 +108,19 @@ known trading targets (`192.168.50.88:{5432,15432,15442,25432}`, and databases
 named pbTradeNet, pbMasterData, pbquant, pb_mldata, pbCICDStage). A pasted production DSN therefore fails
 loudly instead of creating tables in production.
 
-### Real fills → measured costs
-```bash
-# read-only copy of ChromeOmega's trade log into btval-db. The DSN is used once and never stored.
-BTVAL_SOURCE_DSN=postgresql://pbservice:...@192.168.50.88:15442/pbTradeNet \
-  python -m btval sync --table live --venue binance --source-db tradenet-prod
-python -m btval calibrate --venue binance     # -> calibration_id + slippage/fee bps
-```
-`sync` opens a `READ ONLY` transaction, selects an explicit column list, and never
-reads `api_key_ref` or `user_id`. `venue` is your declaration: the log cannot tell
-pbFinance fills from Binance fills, and `ChromeOmega_sim_trade_log` is empty in
-both preprod and prod.
+### Costs
+btval does not read production: no pbTradeNet, no pbMasterData, nothing on the
+production hosts (`assert_not_tradenet_source` refuses them). Fee and slippage
+come from your own `Config`, from fills you push to `POST /ingest/trades`, or from
+btval's own pbFinance paper fills (`venue_drift_bps` per order).
 
 | Endpoint | What it tells you |
 |---|---|
-| `POST /fills/calibrate` | Entry slippage (fill vs `signal_price`), fees, funding, signal→fill delay. Sends `recommended_config` to validation via `calibration_id`. |
-| `POST /fills/shortfall` | The ideal signal→exit edge versus what the account kept: entry slippage, fees, funding, and the residual. |
-| `POST /fills/venue-gap?a=pbfinance&b=binance` | The same signals on two venues: whether pbFinance agrees with Binance on *whether* a fill happened and *at what price*. |
+| `POST /fills/calibrate` | Entry slippage (fill vs `signal_price`), fees, funding for ingested fills; feeds `calibration_id`. |
+| `POST /fills/shortfall` | Ideal signal→exit edge vs what was kept, itemised. |
+| `GET /fills/performance` | Trades, win rate, PnL, ROI on margin, profit factor per strategy. |
 
-Rows with impossible prices (an exit or signal price more than 3× away from the entry) are
-treated as bad writes in the source log. Their whole position is excluded and listed under
-`excluded_rows`, so they can be fixed at the source. Live example: an S26 SOL short with
-entry 95.60 and exit 1542.24.
-
-Bars straight from pbMasterData (read-only; the still-forming bar is dropped):
-```bash
-BTVAL_BARS_DSN=postgresql://pbservice:...@192.168.50.88:25432/pbMasterData \
-  python -m btval validate --pg-table master_data.cagg_ohlcv_1440m --pair-id 5 --bar-label open \
-  --strategy tsmom --prior-trials 0 --calibration-id 1 --save
-```
-
-Calibration caveats (also returned by the endpoint):
-- Only **filled** orders are in a trade log. Limit entries that never filled are invisible, so the measured entry slippage understates the cost.
-- Exit slippage can't be measured, because the log has no exit decision price.
+Rows with impossible prices (exit or signal >3× off entry) are excluded and listed in `excluded_rows`.
 
 ### Paper trading on pbFinance
 ```bash
