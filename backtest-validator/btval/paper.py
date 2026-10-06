@@ -75,6 +75,32 @@ def create_session(store: Store, *, strategy: str, params: dict, symbol: str, in
         return int(res.inserted_primary_key[0])
 
 
+_INTERVAL_MIN = {"15m": 15, "1h": 60, "4h": 240, "12h": 720, "1d": 1440}
+
+
+def load_bars(venue: SimVenue, symbol: str, interval: str, n: int) -> pd.Series:
+    """Closed bars for the decision.
+
+    With BTVAL_BARS_DSN set, bars come from pbMasterData's live OHLCV aggregates
+    (read-only): pbFinance's /klines aggregates anything >= 1h into HOURLY
+    buckets, so a '1d' request there returns hourly bars labelled daily.
+    Without it, the venue's klines are used (correct for < 1h only).
+    """
+    import os
+
+    dsn = os.environ.get("BTVAL_BARS_DSN")
+    if not dsn:
+        return venue.klines(symbol, interval, limit=n)
+    from .data import load_pg_bars, pair_id_for
+    mins = _INTERVAL_MIN.get(interval)
+    if mins is None:
+        raise ValueError(f"unsupported interval {interval}; use one of {list(_INTERVAL_MIN)}")
+    since = (pd.Timestamp.now(tz="UTC") - pd.Timedelta(minutes=mins * (n + 5))).strftime("%Y-%m-%d %H:%M")
+    s, _ = load_pg_bars(dsn, f"master_data.cagg_ohlcv_{mins}m", pair_id_for(dsn, symbol), "open", since,
+                        now=pd.Timestamp(venue.clock(), unit="s", tz="UTC"))
+    return s
+
+
 def _slippage_bps(cost: dict, session_id: int, bar_ts: pd.Timestamp) -> float:
     mode = cost.get("mode", "fixed")
     if mode == "none":
@@ -155,9 +181,30 @@ def _place(store: Store, venue: SimVenue, sess: dict, bar_ts: pd.Timestamp, kind
         upd.update(status="no_trade", note="; ".join(note + ["below venue minimum / no change"]))
     else:
         try:
-            r = venue.market_order(sess["symbol"], qty, coid)
-            avg = float(r.get("avgPrice") or 0) or price
-            exe = float(r.get("executedQty") or abs(qty)) * np.sign(qty)
+            # Reduce first with reduceOnly, then open the remainder as its own
+            # order. One-way Binance nets either way; pbFinance only nets
+            # correctly with reduceOnly, and drops the excess of a flip.
+            legs = []
+            if cur_qty and np.sign(qty) != np.sign(cur_qty):
+                red = filt.round_qty(np.sign(qty) * min(abs(qty), abs(cur_qty)))
+                if red:
+                    legs.append((red, True))
+                rest = filt.round_qty(qty - red)
+                if rest:
+                    legs.append((rest, False))
+            else:
+                legs.append((qty, False))
+            exe_total = notional = 0.0
+            raws = []
+            for i, (lq, ro) in enumerate(legs):
+                r = venue.market_order(sess["symbol"], lq, f"{coid}-{i}", reduce_only=ro)
+                raws.append(r)
+                ex = float(r["executedQty"]) * np.sign(lq)
+                exe_total += ex
+                notional += abs(ex) * (float(r.get("avgPrice") or 0) or price)
+            avg = notional / abs(exe_total) if exe_total else price
+            exe = exe_total
+            r = {"orderId": ",".join(str(x.get("orderId")) for x in raws), "status": "FILLED", "legs": raws}
             sign = 1.0 if qty > 0 else -1.0
             slip = _slippage_bps(sess["cost_model"], sid, bar_ts)
             real = avg * (1 + sign * slip / 1e4)
@@ -188,7 +235,7 @@ def tick(store: Store, venue: SimVenue, session_id: int) -> dict:
         raise RuntimeError("venue host differs from the one this session was created on")
 
     strat = get_strategy(sess["strategy"])
-    prices = venue.klines(sess["symbol"], sess["interval"], limit=max(strat.warmup + 50, 300))
+    prices = load_bars(venue, sess["symbol"], sess["interval"], max(strat.warmup + 50, 300))
     bar_ts, price = prices.index[-1], float(prices.iloc[-1])
     sig = float(np.clip(strat.signal(prices, **sess["params"]).iloc[-1],
                         -sess["max_leverage"], sess["max_leverage"]))

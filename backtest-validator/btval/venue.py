@@ -109,11 +109,18 @@ class SimVenue:
                     tick=float(pf.get("tickSize", 0.01)), min_notional=float(mn.get("notional", 5.0)))
         return self._filters[symbol]
 
-    def market_order(self, symbol: str, qty: float, client_order_id: str) -> dict:
+    def market_order(self, symbol: str, qty: float, client_order_id: str, reduce_only: bool = False) -> dict:
         side = "BUY" if qty > 0 else "SELL"
-        return self._signed("POST", "/fapi/v1/order", {
-            "symbol": symbol, "side": side, "type": "MARKET", "quantity": abs(qty),
-            "newClientOrderId": client_order_id, "newOrderRespType": "RESULT"})
+        params = {"symbol": symbol, "side": side, "type": "MARKET", "quantity": abs(qty),
+                  "newClientOrderId": client_order_id, "newOrderRespType": "RESULT"}
+        if reduce_only:
+            params["reduceOnly"] = "true"
+        body = self._signed("POST", "/fapi/v1/order", params)
+        # pbFinance answers HTTP 200 with status REJECTED (e.g. insufficient
+        # margin). A 200 is not a fill.
+        if str(body.get("status", "")).upper() != "FILLED" or float(body.get("executedQty") or 0) <= 0:
+            raise RuntimeError(f"order not filled: status={body.get('status')} executedQty={body.get('executedQty')}")
+        return body
 
     def position_amt(self, symbol: str) -> float:
         body = self._signed("GET", "/fapi/v2/positionRisk", {"symbol": symbol})

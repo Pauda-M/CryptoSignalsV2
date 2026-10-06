@@ -105,3 +105,18 @@ def load_pg_bars(dsn: str, table: str, pair_id: int, bar_label: str, since: str 
         notes.append(f"dropped {int(forming.sum())} still-forming bar(s) closing after {now:%Y-%m-%d %H:%M}Z")
         s = s[~forming]
     return s, notes
+
+
+def pair_id_for(dsn: str, symbol: str) -> int:
+    """master_data.hf_pairs id for a Binance symbol (BTCUSDT or BTC/USDT). Read-only."""
+    import psycopg
+
+    sym = symbol.replace("/", "").upper()
+    with psycopg.connect(dsn) as cx:
+        cx.execute("SET TRANSACTION READ ONLY")
+        row = cx.execute("SELECT id FROM master_data.hf_pairs WHERE replace(upper(symbol), '/', '') = %s",
+                         (sym,)).fetchone()
+        cx.rollback()
+    if not row:
+        raise ValueError(f"symbol {symbol} not in master_data.hf_pairs")
+    return int(row[0])

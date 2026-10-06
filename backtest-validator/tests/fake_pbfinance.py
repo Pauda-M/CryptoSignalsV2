@@ -16,6 +16,7 @@ class FakePbFinance:
         self.position = 0.0
         self.orders = []
         self.seen_client_ids = set()
+        self.reject_next = False
         real = int(time.time() * 1000)
         self.anchor = real - real % interval_ms - (len(self.closes) - 1) * interval_ms  # open of bar 0
         self.now_ms = real
@@ -52,6 +53,16 @@ class FakePbFinance:
                 return httpx.Response(400, json={"code": -4015, "msg": "duplicate clientOrderId"})
             self.seen_client_ids.add(q["newClientOrderId"])
             qty = float(q["quantity"]) * (1 if q["side"] == "BUY" else -1)
+            if self.reject_next:  # pbFinance: insufficient margin -> 200 + REJECTED
+                self.reject_next = False
+                return httpx.Response(200, json={"orderId": 0, "status": "REJECTED", "avgPrice": "0",
+                                                 "executedQty": "0.0"})
+            # pbFinance nets an opposite-side order correctly only with reduceOnly
+            if self.position and np.sign(qty) != np.sign(self.position) and q.get("reduceOnly") != "true":
+                return httpx.Response(200, json={"orderId": 0, "status": "FILLED", "avgPrice": "1",
+                                                 "executedQty": q["quantity"], "note": "would corrupt netting"})
+            if q.get("reduceOnly") == "true" and abs(qty) > abs(self.position) + 1e-12:
+                return httpx.Response(400, json={"code": -2022, "msg": "ReduceOnly Order is rejected."})
             ref = self.closes[-2]
             avg = ref * (1 + np.sign(qty) * self.fill_offset_bps / 1e4)
             self.position += qty

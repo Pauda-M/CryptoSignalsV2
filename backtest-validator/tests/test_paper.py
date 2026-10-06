@@ -2,7 +2,7 @@ import numpy as np
 import pytest
 from sqlalchemy import select
 
-from btval.paper import create_session, report, tick
+from btval.paper import create_session, ledger, report, tick
 from btval.store import Store, paper_orders
 from btval.venue import SimVenue
 
@@ -146,3 +146,31 @@ def test_trade_stats_round_trip():
     assert st["realized_pnl_usd"] == pytest.approx(10 - 5 - 0.5)
     assert st["unrealized_pnl_usd"] == pytest.approx(10.0)
     assert st["roi_pct"] == pytest.approx((4.5 + 10) / 1000 * 100)
+
+
+def test_rejected_200_is_not_a_fill(store):
+    fake = FakePbFinance(_uptrend())
+    fake.reject_next = True
+    sid = _session(store)
+    out = tick(store, _venue(fake), sid)
+    assert out["order"]["status"] == "error" and "REJECTED" in out["order"]["note"]
+    assert report(store, sid)["orders"] == {"error": 1}
+
+
+def test_flip_uses_reduce_only_then_open(store):
+    fake = FakePbFinance(_uptrend())
+    loose = _deployable_run(store, dict(KILL, max_dd_pct_limit=-99.0))
+    sid = _session(store, run_id=loose, params={"fast": 10, "slow": 50, "long_only": False},
+                   max_order_notional=1e9)
+    tick(store, _venue(fake), sid)
+    assert fake.position > 0
+    for _ in range(80):                       # crash it until the fast MA crosses below
+        fake.advance(fake.closes[-1] * 0.97)
+        out = tick(store, _venue(fake), sid)
+        if fake.position < 0:
+            break
+    assert fake.position < 0, out
+    flip = [o for o in fake.orders if o.get("reduceOnly") == "true"]
+    assert flip, "reducing leg must be reduceOnly"
+    led = ledger(store, sid)
+    assert np.isclose(led[led.status == "filled"]["venue_executed_qty"].sum(), fake.position, atol=1e-9)
