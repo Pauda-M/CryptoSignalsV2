@@ -29,7 +29,7 @@ fills = Table(
     "fills", md,
     Column("id", Integer, primary_key=True, autoincrement=True),
     Column("venue", String(32), nullable=False),        # 'binance' | 'pbfinance' | ...
-    Column("source_db", String(128), nullable=False),   # label, e.g. 'tradenet-prod'
+    Column("source_db", String(128), nullable=False),   # free-text label of where rows came from
     Column("source_row_id", BigInteger, nullable=False),
     Column("session_id", BigInteger), Column("position_id", BigInteger),
     Column("position_group_id", String(128)),

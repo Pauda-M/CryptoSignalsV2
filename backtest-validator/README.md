@@ -1,8 +1,8 @@
 # backtest-validator (`btval`)
 
 A standalone service that tries to reject trading strategies, then paper-trades
-the survivors on **pbFinance** (the Binance-compatible simulator) with costs
-measured from real fills, and shows it all on a live dashboard.
+the survivors on **pbFinance** (the Binance-compatible simulator) against live
+candles, and shows it all on a live dashboard.
 
 It imports nothing from the rest of this repository, keeps its **own database**
 (SQLite, or its own `btval-db` Postgres), and can place orders **only** on the
@@ -11,13 +11,13 @@ simulator.
 ```
 validate ──► DEPLOYABLE run (+ kill conditions)
                  │
-real fills ──► sync (read-only) ──► calibrate ──► slippage / fee bps
-                 │                                     │
-                 └───────────► paper session ◄─────────┘
-                                   │  per closed bar: signal → MARKET order on pbFinance
-                                   │  → booked at sim fill moved by measured slippage + fees
-                                   ▼
-                     btval-db  ──►  dashboard  (http://host:8790/)
+                 ▼
+          paper session ── per closed bar: signal → signed MARKET order on pbFinance
+                 │          → booked at the sim fill moved by slippage + fees
+                 ▼
+     btval-db  ──►  dashboard  (http://host:8790/)
+
+pbMasterData 1m bars ─(read-only)─► bars-mirror ─► pbFinance's own DB ─► fills at live price
 ```
 
 ```
@@ -108,59 +108,42 @@ known trading targets (`192.168.50.88:{5432,15432,15442,25432}`, and databases
 named pbTradeNet, pbMasterData, pbquant, pb_mldata, pbCICDStage). A pasted production DSN therefore fails
 loudly instead of creating tables in production.
 
-### Real fills → measured costs
-```bash
-# read-only copy of ChromeOmega's trade log into btval-db. The DSN is used once and never stored.
-BTVAL_SOURCE_DSN=postgresql://pbservice:...@192.168.50.88:15442/pbTradeNet \
-  python -m btval sync --table live --venue binance --source-db tradenet-prod
-python -m btval calibrate --venue binance     # -> calibration_id + slippage/fee bps
-```
-`sync` opens a `READ ONLY` transaction, selects an explicit column list, and never
-reads `api_key_ref` or `user_id`. `venue` is your declaration: the log cannot tell
-pbFinance fills from Binance fills, and `ChromeOmega_sim_trade_log` is empty in
-both preprod and prod.
+### Live bars
+The only production data btval reads is pbMasterData's OHLCV, read-only:
+- **Decisions:** `BTVAL_BARS_DSN` points the runner at `master_data.cagg_ohlcv_<n>m`. The still-forming bar is dropped and buckets are re-stamped to close time.
+- **pbFinance prices:** `btval bars-mirror` copies the last few minutes of `master_data.hf_ohlcv_1m` every 10s into pbFinance's **own** database. pbFinance polls its price table with `NOW()`-relative filters, so pointing it at production directly would scan the production 1-minute table continuously.
 
-| Endpoint | What it tells you |
-|---|---|
-| `POST /fills/calibrate` | Entry slippage (fill vs `signal_price`), fees, funding, signal→fill delay. Sends `recommended_config` to validation via `calibration_id`. |
-| `POST /fills/shortfall` | The ideal signal→exit edge versus what the account kept: entry slippage, fees, funding, and the residual. |
-| `POST /fills/venue-gap?a=pbfinance&b=binance` | The same signals on two venues: whether pbFinance agrees with Binance on *whether* a fill happened and *at what price*. |
-
-Rows with impossible prices (an exit or signal price more than 3× away from the entry) are
-treated as bad writes in the source log. Their whole position is excluded and listed under
-`excluded_rows`, so they can be fixed at the source. Live example: an S26 SOL short with
-entry 95.60 and exit 1542.24.
-
-Bars straight from pbMasterData (read-only; the still-forming bar is dropped):
 ```bash
 BTVAL_BARS_DSN=postgresql://pbservice:...@192.168.50.88:25432/pbMasterData \
   python -m btval validate --pg-table master_data.cagg_ohlcv_1440m --pair-id 5 --bar-label open \
-  --strategy tsmom --prior-trials 0 --calibration-id 1 --save
+  --strategy tsmom --prior-trials 0 --save
 ```
 
-Calibration caveats (also returned by the endpoint):
-- Only **filled** orders are in a trade log. Limit entries that never filled are invisible, so the measured entry slippage understates the cost.
-- Exit slippage can't be measured, because the log has no exit decision price.
+### Costs
+Fee and slippage come from `Config`, or from a calibration built on fills you push to
+`POST /ingest/trades` (`POST /fills/calibrate`, `/fills/shortfall`, `GET /fills/performance`).
+Rows with impossible prices (an exit or signal more than 3× off entry) are excluded and listed in `excluded_rows`.
+Only **filled** orders appear in any fill log, so the measured entry slippage understates the cost of a limit-entry strategy.
 
 ### Paper trading on pbFinance
 ```bash
 POST /paper/sessions {"strategy":"sma_cross","symbol":"BTCUSDT","interval":"1d",
-                      "validation_run_id":12,"calibration_id":3,"cost_mode":"empirical"}
+                      "validation_run_id":12,"fee_bps":4,"slippage_bps":3}
 python -m btval paper-loop          # or the btval-runner container
 ```
 On each closed bar, the runner:
-1. Computes the signal on the last **closed** kline. The kline that is still forming is dropped.
+1. Computes the signal on the last **closed** bar, from pbMasterData when `BTVAL_BARS_DSN` is set and otherwise from pbFinance klines. pbFinance groups every interval of 1h or more into hourly buckets, so its "1d" bars are really hourly. The bar that is still forming is dropped.
 2. Sizes the order to the target position.
 3. Reserves the decision row. `UNIQUE(session, bar, kind)` plus a deterministic `newClientOrderId` means a restart, a crash or a second runner can never place a second order for the same bar.
-4. Sends a MARKET order to pbFinance.
+4. Sends a signed MARKET order to pbFinance. A reducing leg is sent `reduceOnly` and a flip as two orders, because pbFinance only nets correctly with `reduceOnly`. A `200 REJECTED` response is an error, not a fill.
 5. Books the fill at the simulator's price moved **adversely** by the calibrated slippage (`fixed` uses the mean; `empirical` samples the measured distribution, seeded by session and bar), plus fees per side.
 6. Reconciles the venue position against btval's ledger.
 7. Checks the kill conditions from the validation run. A **HALT** flattens the position (the order cap doesn't apply to it) and stops the session.
 
 It stores both the raw simulator fill and the booked fill. `venue_drift_bps` (simulator fill
 versus decision price) is the *measured* version of the backtest's fill
-assumption. If pbFinance already models slippage, use `cost_mode: "none"` to avoid
-counting slippage twice.
+assumption. pbFinance fills at the last 1-minute close and adds no slippage of its own, so btval's slippage
+isn't double-counted. pbFinance keeps orders in memory only, and btval-db is the durable record.
 
 Guards:
 - **Simulator only.** No live mode exists. The host must be in `BTVAL_SIM_HOSTS` **and** internal, and any `*binance*.*` host is refused.

@@ -1,6 +1,7 @@
 # btval stack: its own Postgres, the API + dashboard, and the paper runner.
-# Nothing here points at pbTradeNet / pbMasterData. Trade-log fills arrive via
-# `btval sync` (read-only, run by an operator) or POST /ingest/trades.
+# pbFinance (the simulator) is not in this repo: copy its source to ./pbfinance and
+# add it as service "btval-pbfinance" (network alias "pbfinance") plus
+# "btval-bars-mirror" -- see /opt/pbSolutions/btval/docker-compose.yml on the host.
 #
 #   cp .env.example .env   # fill in simulator key/secret
 #   docker compose up -d --build
@@ -59,7 +60,7 @@ networks:
     name: btval
   sim:
     external: true
-    name: ${SIM_NETWORK:-pb-tradenet-v2}
+    name: ${SIM_NETWORK:-btval}
 
 volumes:
   btval-db-data:

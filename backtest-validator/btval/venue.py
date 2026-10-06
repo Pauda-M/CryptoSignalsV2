@@ -1,8 +1,8 @@
 """Binance-Futures-compatible client for pbFinance, the simulator. SIMULATOR ONLY.
 
-There is no live mode in this module and none should be added. ChromeOmega's
-own client differs between sim and live by base URL alone; a validator that
-can place orders must not be one environment variable away from real money.
+There is no live mode in this module and none should be added. A client whose
+sim and live modes differ by base URL alone is one environment variable away
+from real money; a validator that places orders must not be.
 So the base URL has to pass BOTH:
   1. its host is in BTVAL_SIM_HOSTS (explicit allowlist, default
      'binance-simulator,pbfinance'), and

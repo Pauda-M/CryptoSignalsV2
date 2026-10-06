@@ -68,13 +68,6 @@ def main(argv: list[str] | None = None) -> int:
     d = sub.add_parser("demo", help="run on a synthetic no-edge random walk")
     d.add_argument("--json", action="store_true")
 
-    sy = sub.add_parser("sync", help="copy ChromeOmega trade-log rows into btval's own store (read-only on source)")
-    sy.add_argument("--source-dsn", default=os.environ.get("BTVAL_SOURCE_DSN"),
-                    help="postgresql://... of pbTradeNet; default $BTVAL_SOURCE_DSN. Never stored.")
-    sy.add_argument("--table", choices=["live", "sim"], required=True)
-    sy.add_argument("--venue", required=True, help="what venue these fills came from: binance | pbfinance")
-    sy.add_argument("--source-db", required=True, help="label, e.g. tradenet-prod")
-
     ca = sub.add_parser("calibrate", help="measured fee/slippage from stored fills")
     ca.add_argument("--venue")
     ca.add_argument("--strategy-id", type=int)
@@ -101,13 +94,6 @@ def main(argv: list[str] | None = None) -> int:
     if a.cmd == "serve":
         import uvicorn
         uvicorn.run("btval.api:app", host=a.host, port=a.port)
-        return 0
-    if a.cmd == "sync":
-        from .store import Store
-        from .sync import sync
-        if not a.source_dsn:
-            ap.error("--source-dsn or BTVAL_SOURCE_DSN required")
-        print(json.dumps(sync(Store(), a.source_dsn, a.table, a.venue, a.source_db), default=str, indent=2))
         return 0
     if a.cmd == "calibrate":
         from .fills import calibrate

@@ -1,6 +1,6 @@
 """Execution reality, measured from fills instead of assumed.
 
-Trade-log rows are partial closes (one row per TP rung / stop). Entry-side
+Fill rows may be partial closes (one row per TP rung / stop). Entry-side
 quantities are per POSITION; fee/funding/pnl are summed over its rows.
 Sign convention: positive bps = adverse to you.
 """
@@ -14,9 +14,7 @@ def _sign(direction: pd.Series) -> pd.Series:
     return np.where(direction.str.lower().str.startswith("l"), 1.0, -1.0)
 
 
-# Safety net: a price more than this factor away from the position's own entry
-# is not a fill. (The live "exit 1542" turned out to be a grouping bug, fixed
-# by POSITION_KEY; this stays to catch genuinely bad rows.)
+# A price more than this factor away from the position's own entry is not a fill.
 SUSPECT_FACTOR = 3.0
 
 
@@ -51,8 +49,8 @@ def clean(df: pd.DataFrame) -> tuple[pd.DataFrame, list[dict]]:
     return df[keep], rows
 
 
-# position_id alone is NOT unique in ChromeOmega's log: two strategies reused
-# ids on 2026-05-11 (an ETH trade merged into a SOL short gave "exit 1542").
+# position_id alone is not guaranteed unique across sessions/symbols, so a
+# position is keyed by all of these.
 POSITION_KEY = ["venue", "source_db", "session_id", "position_id", "symbol"]
 
 
@@ -113,7 +111,7 @@ def calibrate(df: pd.DataFrame) -> dict:
     slip_bps = max(0.0, slip.get("notional_weighted_mean", slip["mean"]))
     fee_side = fee.get("notional_weighted_mean", fee["mean"]) / 2
     warnings = [
-        "Only FILLED orders are in a trade log. Limit entries that never filled (price ran away) are "
+        "Only FILLED orders are in a fill log. Limit entries that never filled (price ran away) are "
         "invisible, so measured entry slippage understates the true cost of a limit-entry strategy.",
         "Exit slippage is not measurable: the log has no exit decision price. Only entry slippage is calibrated.",
     ]
@@ -131,8 +129,8 @@ def calibrate(df: pd.DataFrame) -> dict:
         "signal_to_fill_minutes": _dist(p["signal_to_fill_min"]),
         "recommended_config": {"slippage_bps": round(slip_bps, 3), "fee_bps": round(fee_side, 3)},
         "empirical_slippage_bps": [round(float(v), 4) for v in p["entry_slip_bps"].dropna().tolist()],
-        "warnings": warnings + ([f"{len(excluded)} trade-log rows excluded as impossible prices; "
-                                 "see excluded_rows -- they are bugs in the source log."] if excluded else []),
+        "warnings": warnings + ([f"{len(excluded)} rows excluded as impossible prices; "
+                                 "see excluded_rows."] if excluded else []),
         "excluded_rows": excluded,
     }
 
