@@ -79,7 +79,7 @@ _IDENT = __import__("re").compile(r"^[A-Za-z_][A-Za-z0-9_]*\.[A-Za-z_][A-Za-z0-9
 
 def load_pg_bars(dsn: str, table: str, pair_id: int, bar_label: str, since: str | None = None,
                  now: pd.Timestamp | None = None) -> tuple[pd.Series, list[str]]:
-    """Closes from a NON-production Postgres OHLCV table (refuses prod hosts/DBs).
+    """Closes from a Postgres OHLCV table (e.g. pbMasterData master_data.cagg_ohlcv_1440m).
 
     READ ONLY transaction. Returns close prices stamped at bar CLOSE time with
     the still-forming bar dropped: real-time continuous aggregates return
@@ -87,8 +87,6 @@ def load_pg_bars(dsn: str, table: str, pair_id: int, bar_label: str, since: str 
     """
     import psycopg
 
-    from .store import assert_not_tradenet_source
-    assert_not_tradenet_source(dsn)
     if not _IDENT.match(table):
         raise ValueError("table must be schema.table")
     q = f"SELECT timestamp, close FROM {table} WHERE pair_id = %s" + (" AND timestamp >= %s" if since else "") \

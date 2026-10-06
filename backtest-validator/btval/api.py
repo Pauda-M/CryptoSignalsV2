@@ -257,7 +257,7 @@ def get_run(run_id: int, store: Store = Depends(get_store)):
 # ---------------------------------------------------------------- fills
 class IngestReq(BaseModel):
     venue: str = Field(description="'binance' for real fills, 'pbfinance' for simulator fills. You decide; the log cannot tell.")
-    source_db: str = Field(description="Free-text label for where the rows came from.")
+    source_db: str = Field(description="Label for where the rows came from, e.g. 'tradenet-prod'.")
     rows: list[dict[str, Any]]
 
 

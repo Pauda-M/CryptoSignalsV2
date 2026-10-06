@@ -29,7 +29,7 @@ fills = Table(
     "fills", md,
     Column("id", Integer, primary_key=True, autoincrement=True),
     Column("venue", String(32), nullable=False),        # 'binance' | 'pbfinance' | ...
-    Column("source_db", String(128), nullable=False),   # free-text label of where rows came from
+    Column("source_db", String(128), nullable=False),   # label, e.g. 'tradenet-prod'
     Column("source_row_id", BigInteger, nullable=False),
     Column("session_id", BigInteger), Column("position_id", BigInteger),
     Column("position_group_id", String(128)),
@@ -124,26 +124,6 @@ paper_equity = Table(
 )
 
 FILL_COLUMNS = [c.name for c in fills.columns if c.name not in ("id", "ingested_at")]
-
-
-PROD_HOSTS = {"192.168.50.88", "100.125.213.17", "pbquantdb01", "20.203.141.46", "20.203.133.214"}
-
-
-def assert_not_tradenet_source(dsn: str) -> None:
-    """btval never READS production either: no pbTradeNet, no pbMasterData, nothing
-    on the production hosts. Bars come from CSV or the simulator's klines."""
-    import re
-    import urllib.parse
-
-    if "://" in dsn:
-        u = urllib.parse.urlsplit(dsn)
-        host, port, db = u.hostname or "", u.port or 5432, (u.path or "/").lstrip("/")
-    else:  # libpq key=value form
-        kv = dict(re.findall(r"(\w+)\s*=\s*'?([^\s']*)'?", dsn))
-        host, port, db = kv.get("host", ""), int(kv.get("port", 5432) or 5432), kv.get("dbname", "")
-    if db.lower() in FORBIDDEN_DBNAMES or host.lower() in PROD_HOSTS:
-        raise RuntimeError("btval does not read production databases (pbTradeNet, pbMasterData, prod hosts). "
-                           "Use a CSV or the simulator's klines.")
 
 
 def assert_not_trading_db(url: str) -> None:

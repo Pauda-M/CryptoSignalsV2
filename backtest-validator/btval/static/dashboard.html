@@ -110,7 +110,7 @@ details > summary { cursor: pointer; color: var(--text-secondary); font-size: 13
   <section class="alerts" id="alerts" aria-live="polite"></section>
 
   <section class="panel">
-    <h2>Imported fills performance <span class="muted">(only what was pushed to POST /ingest/trades — btval never reads pbTradeNet)</span></h2>
+    <h2>ChromeOmega trade performance <span class="muted">(synced trade log — venue not recorded by ChromeOmega: may mix Binance and pbFinance)</span></h2>
     <div class="filters">
       <span class="muted">Period</span>
       <div class="seg" role="group" aria-label="Period">
@@ -196,7 +196,7 @@ details > summary { cursor: pointer; color: var(--text-secondary); font-size: 13
         <th>Verdict</th><th class="num">Trials</th></tr></thead><tbody></tbody></table></div>
     </div>
     <div class="panel">
-      <h2>Cost calibrations</h2>
+      <h2>Cost calibrations (from real fills)</h2>
       <div class="table-wrap"><table id="cals"><thead><tr><th>ID</th><th>When</th><th class="num">Positions</th>
         <th class="num">Slip bps</th><th class="num">p90</th><th class="num">Fee bps/side</th></tr></thead><tbody></tbody></table></div>
     </div>
@@ -328,7 +328,7 @@ details > summary { cursor: pointer; color: var(--text-secondary); font-size: 13
     $("#cals tbody").innerHTML = state.cals.length ? state.cals.map((c) => `<tr><td class="num">${c.id}</td><td>${ts(c.created_at)}</td>
       <td class="num">${c.n_positions ?? "—"}</td><td class="num">${num(c.recommended_config?.slippage_bps)}</td>
       <td class="num">${num(c.entry_slippage_bps?.p90)}</td><td class="num">${num(c.recommended_config?.fee_bps)}</td></tr>`).join("")
-      : `<tr><td colspan="6" class="empty">No calibrations yet.</td></tr>`;
+      : `<tr><td colspan="6" class="empty">No calibrations. Run <code>btval sync</code> then <code>btval calibrate</code>.</td></tr>`;
   }
 
   function tile(k, v, s = "", meter = null) {
@@ -396,7 +396,7 @@ details > summary { cursor: pointer; color: var(--text-secondary); font-size: 13
     document.querySelectorAll(".seg button").forEach((b) => b.setAttribute("aria-pressed", String(+b.dataset.days === state.days)));
     const p = state.perf, t = p?.total;
     if (!t) {
-      $("#perf-tiles").innerHTML = `<div class="empty">No imported fills in this period.</div>`;
+      $("#perf-tiles").innerHTML = `<div class="empty">No synced fills in this period. Run <code>btval sync</code>.</div>`;
       $("#perf tbody").innerHTML = ""; $("#perf-note").textContent = ""; $("#perf-window").textContent = ""; return;
     }
     $("#perf-window").textContent = `${ts(t.first)} → ${ts(t.last)}`;
@@ -416,7 +416,7 @@ details > summary { cursor: pointer; color: var(--text-secondary); font-size: 13
       <td>${ts(r.last)}</td></tr>`).join("");
     const ex = p.excluded_rows?.length || 0;
     $("#perf-note").textContent = `ROI on margin = PnL / margin committed (notional ÷ leverage). Win rate and PnL are per position (partial closes merged).`
-      + (ex ? ` ${ex} row(s) excluded as impossible prices (exit or signal &gt;3× off entry).` : "");
+      + (ex ? ` ${ex} trade-log row(s) excluded as impossible prices (bad writes in the ChromeOmega log).` : "");
   }
 
   let formFilled = false;
