@@ -1,0 +1,15 @@
+[project]
+name = "btval"
+version = "0.1.0"
+description = "Standalone backtest validation service: engine, leakage critic, deflated Sharpe, walk-forward, sizing, live health."
+requires-python = ">=3.10"
+dependencies = ["numpy>=1.26", "pandas>=2.1", "scipy>=1.11", "fastapi>=0.110", "uvicorn>=0.29", "pydantic>=2.5"]
+
+[project.scripts]
+btval = "btval.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["btval*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
